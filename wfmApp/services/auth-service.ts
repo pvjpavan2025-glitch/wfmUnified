@@ -35,7 +35,7 @@ class AuthService {
     
     // Store the token
     if (typeof window !== 'undefined') {
-      localStorage.setItem('auth_token', data.access_token)
+      localStorage.setItem('access_token', data.access_token)
     }
 
     return {
@@ -68,12 +68,12 @@ class AuthService {
 
   getToken(): string | null {
     if (typeof window === 'undefined') return null
-    return localStorage.getItem('auth_token')
+    return localStorage.getItem('access_token')
   }
 
   logout(): void {
     if (typeof window !== 'undefined') {
-      localStorage.removeItem('auth_token')
+      localStorage.removeItem('access_token')
     }
   }
 }

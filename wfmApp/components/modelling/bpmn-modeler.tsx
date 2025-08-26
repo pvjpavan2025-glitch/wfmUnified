@@ -68,7 +68,7 @@ const BpmnModelerComponent: React.FC<BpmnModelerProps> = ({
         ] = await Promise.all([
           import('bpmn-js/lib/Modeler'),
           import('bpmn-js-properties-panel'),
-          import('bpmn-js-color-picker'),
+          import('bpmn-js-color-picker').catch(() => null), // Handle missing module gracefully
           import('diagram-js-minimap'),
           import('camunda-bpmn-moddle/resources/camunda.json')
         ]);
@@ -77,7 +77,7 @@ const BpmnModelerComponent: React.FC<BpmnModelerProps> = ({
         BpmnPropertiesPanelModule = PropertiesPanelModule.BpmnPropertiesPanelModule;
         BpmnPropertiesProviderModule = PropertiesPanelModule.BpmnPropertiesProviderModule;
         CamundaPlatformPropertiesProviderModule = PropertiesPanelModule.CamundaPlatformPropertiesProviderModule;
-        ColorPickerModule = ColorPickerModuleImport.default;
+        ColorPickerModule = ColorPickerModuleImport?.default || null;
         MinimapModule = MinimapModuleImport.default;
         camundaModdleDescriptor = CamundaModdle.default;
 
@@ -125,9 +125,9 @@ const BpmnModelerComponent: React.FC<BpmnModelerProps> = ({
           BpmnPropertiesPanelModule,
           BpmnPropertiesProviderModule,
           CamundaPlatformPropertiesProviderModule,
-          ColorPickerModule,
+          ...(ColorPickerModule ? [ColorPickerModule] : []),
           MinimapModule
-        ],
+        ].filter(Boolean),
         moddleExtensions: {
           camunda: camundaModdleDescriptor
         },

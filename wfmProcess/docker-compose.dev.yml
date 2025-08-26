@@ -1,0 +1,89 @@
+services:
+  # PostgreSQL database
+  postgres:
+    image: postgres:15
+    container_name: bpmn-postgres
+    environment:
+      POSTGRES_DB: workflow
+      POSTGRES_USER: workflow_user
+      POSTGRES_PASSWORD: workflow_pass
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    networks:
+      - bpmn-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U workflow_user -d workflow"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Backend API service
+  backend-dev:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.dev
+    container_name: bpmn-backend-dev
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://workflow_user:workflow_pass@postgres:5432/workflow
+      - REDIS_URL=redis://redis:6379
+      - SECRET_KEY=dev-secret-key-change-in-production
+      - DEBUG=true
+      - LOG_LEVEL=INFO
+    volumes:
+      - ./backend:/app
+      - /app/__pycache__
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - bpmn-network
+
+  # Redis Cache
+  redis:
+    image: redis:7-alpine
+    container_name: bpmn-redis
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+    ports:
+      - "6379:6379"
+    networks:
+      - bpmn-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # React Frontend
+  frontend-dev:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.dev
+    container_name: bpmn-frontend-dev
+    environment:
+      - REACT_APP_API_URL=http://localhost:8000
+      - REACT_APP_WS_URL=ws://localhost:8000/ws
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    ports:
+      - "3000:3000"
+    depends_on:
+      - backend-dev
+    networks:
+      - bpmn-network
+
+volumes:
+  postgres_data:
+  redis_data:
+
+networks:
+  bpmn-network:
+    driver: bridge

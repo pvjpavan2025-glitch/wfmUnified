@@ -1,0 +1,67 @@
+# Azure DevOps pipeline for building, pushing, and deploying the wfmApp (Next.js) container
+# Triggers on changes to the main branch under wfmApp/
+trigger:
+  branches:
+    include:
+      - main
+  paths:
+    include:
+      - wfmApp/**
+
+pr:
+  branches:
+    include:
+      - main
+  paths:
+    include:
+      - wfmApp/**
+
+pool:
+  vmImage: ubuntu-latest
+
+variables:
+  # Required pipeline variables (set in Azure DevOps UI or variable group):
+  # - azureSubscription: Name of the Azure RM service connection
+  # - acrServiceConnection: Name of the Docker Registry service connection pointing to ACR
+  # - acrLoginServer: e.g. myregistry.azurecr.io
+  # - webAppNameFrontend: Azure Web App for Containers name hosting the frontend
+  # Optional:
+  # - backendUrl: Public URL for backend API gateway (e.g., https://<backend>.azurewebsites.net)
+  # - ACR_USER / ACR_PASSWORD (only if your Web App is not assigned pull permissions to ACR)
+  imageRepository: wfmapp
+  imageTag: $(Build.BuildId)
+
+steps:
+  - checkout: self
+    fetchDepth: 1
+
+  - task: Docker@2
+    displayName: Build and push frontend image
+    inputs:
+      containerRegistry: $(acrServiceConnection)
+      repository: $(imageRepository)
+      command: buildAndPush
+      Dockerfile: wfmApp/Dockerfile
+      buildContext: wfmApp
+      tags: |
+        $(imageTag)
+
+  # Deploy the container to Azure Web App for Containers
+  - task: AzureWebAppContainer@1
+    displayName: Deploy frontend container to Azure Web App
+    inputs:
+      azureSubscription: $(azureSubscription)
+      appName: $(webAppNameFrontend)
+      imageName: $(acrLoginServer)/$(imageRepository):$(imageTag)
+      appSettings: |
+        -WEBSITES_ENABLE_APP_SERVICE_STORAGE=false
+        -WEBSITES_PORT=3000
+        -NEXT_PUBLIC_AUTH_SERVICE_URL=$(backendUrl)
+        -NEXT_PUBLIC_API_GATEWAY_URL=$(backendUrl)
+        -DOCKER_REGISTRY_SERVER_URL=https://$(acrLoginServer)
+        -DOCKER_REGISTRY_SERVER_USERNAME=$(ACR_USER)
+        -DOCKER_REGISTRY_SERVER_PASSWORD=$(ACR_PASSWORD)
+
+  - script: |
+      echo "Deployed image: $(acrLoginServer)/$(imageRepository):$(imageTag)"
+    displayName: Post-deploy info

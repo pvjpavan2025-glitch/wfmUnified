@@ -46,7 +46,7 @@ pool:
 
 variables:
   # Azure Configuration
-  azureSubscription: 'Azure Subscription'
+  azureSubscription: 'wfm-azure-conn'
   resourceGroupName: 'wfm-unified-rg'
   location: 'East US'
   

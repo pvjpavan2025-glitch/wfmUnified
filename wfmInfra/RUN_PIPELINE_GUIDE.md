@@ -19,7 +19,7 @@ POSTGRES_PASSWORD=<strong-password-for-azure-postgres>
 1. **Project Settings** → **Service Connections** → **New service connection**
 2. **Azure Resource Manager** → **Service principal (automatic)**
 3. Subscription: `536f83d4-d66d-4c2b-86f9-93e05ccf646d`
-4. Name: `Azure Subscription`
+4. Name: `wfm-azure-conn`
 5. ✅ **Grant access permission to all pipelines**
 
 ### Step 3: Environment

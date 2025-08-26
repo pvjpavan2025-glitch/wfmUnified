@@ -45,7 +45,7 @@ POSTGRES_PASSWORD: [Strong password for PostgreSQL admin]
 2. Click **New service connection** → **Azure Resource Manager**
 3. Select **Service principal (automatic)**
 4. Choose subscription: `536f83d4-d66d-4c2b-86f9-93e05ccf646d`
-5. Name: `Azure Subscription`
+5. Name: `wfm-azure-conn`
 6. Check **Grant access permission to all pipelines**
 
 ### Step 3: Create Environment

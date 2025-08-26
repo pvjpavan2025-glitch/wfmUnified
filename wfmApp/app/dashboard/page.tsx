@@ -5,7 +5,7 @@ import DashboardContent from '@/components/dashboard-content'
 export default function DashboardPage() {
   return (
     <ProtectedRoute>
-      <AppShell title="Field Service Management" subtitle="Admin Dashboard">
+      <AppShell title="Workforce Management" subtitle="Admin Dashboard">
         <DashboardContent />
       </AppShell>
     </ProtectedRoute>

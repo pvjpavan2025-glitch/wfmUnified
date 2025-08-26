@@ -15,8 +15,8 @@ const geistMono = localFont({
 });
 
 export const metadata: Metadata = {
-  title: "Field Service Management",
-  description: "Admin Dashboard for Field Service Operations",
+  title: 'WFM - Workforce Management',
+  description: "Admin Dashboard for Workforce Operations",
 };
 
 export default function RootLayout({

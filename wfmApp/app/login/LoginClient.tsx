@@ -126,7 +126,7 @@ export default function LoginClient() {
               <div className="mx-auto mb-6 flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-orange-500 to-orange-600 shadow-[0_10px_30px_-5px_rgba(255,120,0,0.6)] ring-1 ring-white/20">
                 <Settings className="h-7 w-7 text-white" />
               </div>
-              <h1 className="text-2xl font-semibold tracking-[-0.02em]">Field Service Management</h1>
+              <h1 className="text-4xl font-bold text-white mb-2">Workforce Management</h1>
               <p className="mt-1 text-sm text-white/70">Admin Dashboard Login</p>
             </div>
 
@@ -210,7 +210,7 @@ export default function LoginClient() {
             </div>
           </div>
 
-          <p className="mt-6 text-center text-xs text-white/60">© 2024 Field Service Management. All rights reserved.</p>
+          <p className="mt-6 text-center text-xs text-white/60">© 2024 Workforce Management. All rights reserved.</p>
         </div>
 
         <button className="group fixed bottom-4 right-4 inline-flex h-10 items-center justify-center gap-2 rounded-full border border-white/10 bg-white/10 px-4 text-sm text-white/90 backdrop-blur-md transition hover:bg-white/20">

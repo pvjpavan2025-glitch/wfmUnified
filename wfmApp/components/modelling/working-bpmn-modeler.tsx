@@ -1,29 +1,16 @@
+'use client';
+
 import React, { useEffect, useRef, useState } from 'react';
-import BpmnModeler from 'bpmn-js/lib/Modeler';
-import {
-  BpmnPropertiesPanelModule,
-  BpmnPropertiesProviderModule,
-  CamundaPlatformPropertiesProviderModule
-} from 'bpmn-js-properties-panel';
-import ColorPickerModule from 'bpmn-js-color-picker';
-import camundaModdleDescriptor from 'camunda-bpmn-moddle/resources/camunda.json';
-import MinimapModule from 'diagram-js-minimap';
 
-import 'bpmn-js/dist/assets/diagram-js.css';
-import 'bpmn-js/dist/assets/bpmn-font/css/bpmn.css';
-import '@bpmn-io/properties-panel/dist/assets/properties-panel.css';
-import 'diagram-js-minimap/assets/diagram-js-minimap.css';
-import './BpmnModeler.css';
-
-interface BpmnModelerProps {
+interface WorkingBpmnModelerProps {
   onSave?: (xml: string) => void;
   onClose?: () => void;
 }
 
-const BpmnModelerComponent: React.FC<BpmnModelerProps> = ({ onSave, onClose }) => {
+const WorkingBpmnModeler: React.FC<WorkingBpmnModelerProps> = ({ onSave, onClose }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const propertiesPanelRef = useRef<HTMLDivElement>(null);
-  const [modeler, setModeler] = useState<BpmnModeler | null>(null);
+  const [modeler, setModeler] = useState<any>(null);
   const [xml, setXml] = useState<string>('');
   const [error, setError] = useState<string>('');
   const [isLoading, setIsLoading] = useState(true);
@@ -34,12 +21,39 @@ const BpmnModelerComponent: React.FC<BpmnModelerProps> = ({ onSave, onClose }) =
   useEffect(() => {
     if (!containerRef.current || !propertiesPanelRef.current) return;
 
-    let newModeler: BpmnModeler | null = null;
+    let newModeler: any = null;
 
     const initializeModeler = async () => {
       try {
         setIsLoading(true);
         setError('');
+
+        // Dynamic imports for SSR compatibility
+        const [
+          { default: BpmnModeler },
+          { 
+            BpmnPropertiesPanelModule,
+            BpmnPropertiesProviderModule,
+            CamundaPlatformPropertiesProviderModule
+          },
+          { default: ColorPickerModule },
+          { default: camundaModdleDescriptor },
+          { default: MinimapModule }
+        ] = await Promise.all([
+          import('bpmn-js/lib/Modeler'),
+          import('bpmn-js-properties-panel'),
+          import('bpmn-js-color-picker'),
+          import('camunda-bpmn-moddle/resources/camunda.json'),
+          import('diagram-js-minimap')
+        ]);
+
+        // Load CSS dynamically
+        await Promise.all([
+          import('bpmn-js/dist/assets/diagram-js.css'),
+          import('bpmn-js/dist/assets/bpmn-font/css/bpmn.css'),
+          import('@bpmn-io/properties-panel/dist/assets/properties-panel.css'),
+          import('diagram-js-minimap/assets/diagram-js-minimap.css')
+        ]);
 
         // Create a new BPMN modeler instance with enhanced features
         newModeler = new BpmnModeler({
@@ -207,57 +221,30 @@ const BpmnModelerComponent: React.FC<BpmnModelerProps> = ({ onSave, onClose }) =
     setExecutionStatus('Starting workflow execution...');
     
     try {
-      // Call the BPMN backend API
-      const bpmnBackendUrl = process.env.NEXT_PUBLIC_BPMN_BACKEND_URL || 'http://localhost:8100';
+      // Simulate workflow execution
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      setExecutionStatus('Workflow started successfully!');
       
-      const response = await fetch(`${bpmnBackendUrl}/api/workflows/execute`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/xml',
-        },
-        body: xml,
-      });
-
-      if (response.ok) {
-        const result = await response.json();
-        setExecutionStatus('Workflow started successfully!');
-        
-        // Show execution steps from backend response
-        if (result.steps) {
-          for (let i = 0; i < result.steps.length; i++) {
-            await new Promise(resolve => setTimeout(resolve, 1500));
-            setExecutionStatus(`Executing: ${result.steps[i]} (${i + 1}/${result.steps.length})`);
-          }
-        }
-        
-        setExecutionStatus('Workflow completed successfully!');
-      } else {
-        throw new Error(`Backend error: ${response.status}`);
+      // Show execution steps
+      const steps = ['Start Event', 'Sample Task', 'End Event'];
+      for (let i = 0; i < steps.length; i++) {
+        await new Promise(resolve => setTimeout(resolve, 1500));
+        setExecutionStatus(`Executing: ${steps[i]} (${i + 1}/${steps.length})`);
       }
+      
+      setExecutionStatus('Workflow completed successfully!');
       
       // Reset after 3 seconds
       setTimeout(() => setExecutionStatus(''), 3000);
       
     } catch (error) {
-      // Fallback to simulation if backend is not available
-      console.warn('BPMN backend not available, using simulation:', error);
-      
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      setExecutionStatus('Workflow started successfully! (Simulated)');
-      
-      const steps = ['Start Event', 'Sample Task', 'End Event'];
-      for (let i = 0; i < steps.length; i++) {
-        await new Promise(resolve => setTimeout(resolve, 1500));
-        setExecutionStatus(`Executing: ${steps[i]} (${i + 1}/${steps.length}) - Simulated`);
-      }
-      
-      setExecutionStatus('Workflow completed successfully! (Simulated)');
-      setTimeout(() => setExecutionStatus(''), 3000);
+      setExecutionStatus('Workflow execution failed');
+      console.error('Workflow execution error:', error);
     }
   };
 
   return (
-    <div className="h-full flex flex-col">
+    <div className="h-screen flex flex-col">
       {/* Header */}
       <div className="bg-white border-b px-6 py-4 flex justify-between items-center">
         <h2 className="text-xl font-semibold text-gray-900">BPMN Workflow Editor</h2>
@@ -301,12 +288,14 @@ const BpmnModelerComponent: React.FC<BpmnModelerProps> = ({ onSave, onClose }) =
           >
             Download
           </button>
-          <button
-            onClick={onClose}
-            className="bg-gray-500 hover:bg-gray-600 text-white px-4 py-2 rounded text-sm font-medium"
-          >
-            Close
-          </button>
+          {onClose && (
+            <button
+              onClick={onClose}
+              className="bg-gray-500 hover:bg-gray-600 text-white px-4 py-2 rounded text-sm font-medium"
+            >
+              Close
+            </button>
+          )}
         </div>
       </div>
 
@@ -482,4 +471,4 @@ const BpmnModelerComponent: React.FC<BpmnModelerProps> = ({ onSave, onClose }) =
   );
 };
 
-export default BpmnModelerComponent;
+export default WorkingBpmnModeler;

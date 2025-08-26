@@ -50,7 +50,7 @@ export function AppShell({ title, subtitle, children }: { title: string; subtitl
             <div className="size-10 rounded-full flex items-center justify-center" style={{ background: "var(--wfm-orange-500, #FF7A00)" }}>
               <LayoutDashboard className="w-5 h-5 text-white" />
             </div>
-            <span className="font-medium text-gray-900">App Name</span>
+            <span className="font-medium text-gray-900">WFM - Workforce Management</span>
           </div>
         </SidebarHeader>
         <SidebarContent>
@@ -85,7 +85,7 @@ export function AppShell({ title, subtitle, children }: { title: string; subtitl
           </SidebarGroup>
         </SidebarContent>
         <SidebarSeparator />
-        <SidebarFooter className="text-xs text-gray-500">© 2025 Field Service</SidebarFooter>
+  <SidebarFooter className="text-xs text-gray-500">© 2025 Workforce Management</SidebarFooter>
         <SidebarRail />
       </Sidebar>
 

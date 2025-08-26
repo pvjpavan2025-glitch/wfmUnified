@@ -1,0 +1,335 @@
+version: "3.8"
+services:
+  # PostgreSQL Database for wfmProcess
+  wfm-postgres:
+    image: postgres:15-alpine
+    container_name: wfm_postgres
+    restart: unless-stopped
+    environment:
+      - POSTGRES_USER=wfmprocess
+      - POSTGRES_PASSWORD=wfmprocess123
+      - POSTGRES_DB=wfmprocess
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./wfmProcess/docker/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql
+    networks:
+      - wfm-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U wfmprocess -d wfmprocess"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Redis for local caching
+  wfm-redis:
+    image: redis:7-alpine
+    container_name: wfm_redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - wfm-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # WFM Process Engine Backend
+  wfm-process:
+    build:
+      context: ./wfmProcess/backend
+      dockerfile: Dockerfile
+    container_name: wfm_process_engine
+    restart: unless-stopped
+    ports:
+      - "8090:8090"
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://wfmprocess:wfmprocess123@wfm-postgres:5432/wfmprocess
+      - REDIS_URL=redis://wfm-redis:6379/0
+      - ENVIRONMENT=local
+      - PORT=8090
+      - HOST=0.0.0.0
+      - JWT_SECRET_KEY=wfmv4-super-secret-jwt-key-change-in-production
+      - SECRET_KEY=wfm-process-engine-secret-key-change-in-production
+      - WFM_API_GATEWAY_URL=http://api-gateway:8000
+      - WFM_AUTH_SERVICE_URL=http://auth-service:8001
+      - INT_SERVICES_URL=http://int-services:8082
+    volumes:
+      - ./wfmProcess/backend/app:/app/app
+      - workflow_storage:/app/workflows
+    networks:
+      - wfm-network
+    depends_on:
+      wfm-postgres:
+        condition: service_healthy
+      wfm-redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8090/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Integration Services
+  int-services:
+    build:
+      context: ./intServices
+      dockerfile: Dockerfile
+    container_name: wfm_int_services
+    restart: unless-stopped
+    ports:
+      - "8082:8082"
+    environment:
+      - MONGODB_URL=mongodb+srv://wfmadmin:tsarolabs%4012345%23@wfmdb.cvkb04l.mongodb.net/?retryWrites=true&w=majority&appName=wfmDB
+      - REDIS_URL=redis://default:kIdJfI3xoLxHiKFnCrkGBYffiDla8Y9h@redis-15514.c56.east-us.azure.redns.redis-cloud.com:15514
+      - DATABASE_NAME=wfm
+      - JWT_SECRET_KEY=wfmv4-super-secret-jwt-key-change-in-production
+      - ENVIRONMENT=local
+      - PORT=8082
+      - PROCESS_ENGINE_URL=http://wfm-process:8090
+      - WFM_API_GATEWAY_URL=http://api-gateway:8000
+    volumes:
+      - ./intServices/logs:/app/logs
+    networks:
+      - wfm-network
+    depends_on:
+      - wfm-process
+
+  # Backend Services (from existing docker-compose.integrated.yml)
+  api-gateway:
+    build:
+      context: ./wfmServices
+      dockerfile: Dockerfile
+    container_name: wfm_api_gateway
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      - MONGODB_URL=mongodb+srv://wfmadmin:tsarolabs%4012345%23@wfmdb.cvkb04l.mongodb.net/?retryWrites=true&w=majority&appName=wfmDB
+      - REDIS_URL=redis://default:kIdJfI3xoLxHiKFnCrkGBYffiDla8Y9h@redis-15514.c56.east-us.azure.redns.redis-cloud.com:15514
+      - DATABASE_NAME=wfm
+      - JWT_SECRET_KEY=wfmv4-super-secret-jwt-key-change-in-production
+      - ENVIRONMENT=local
+      - ENV_FILE=env.local
+      - PROCESS_ENGINE_URL=http://wfm-process:8090
+      - INT_SERVICES_URL=http://int-services:8082
+    volumes:
+      - ./wfmServices/logs:/app/logs
+    networks:
+      - wfm-network
+
+  auth-service:
+    build:
+      context: ./wfmServices
+      dockerfile: Dockerfile
+    container_name: wfm_auth_service
+    restart: unless-stopped
+    ports:
+      - "8001:8001"
+    environment:
+      - MONGODB_URL=mongodb+srv://wfmadmin:tsarolabs%4012345%23@wfmdb.cvkb04l.mongodb.net/?retryWrites=true&w=majority&appName=wfmDB
+      - REDIS_URL=redis://default:kIdJfI3xoLxHiKFnCrkGBYffiDla8Y9h@redis-15514.c56.east-us.azure.redns.redis-cloud.com:15514
+      - DATABASE_NAME=wfm
+      - JWT_SECRET_KEY=wfmv4-super-secret-jwt-key-change-in-production
+      - ENVIRONMENT=local
+      - ENV_FILE=env.local
+    volumes:
+      - ./wfmServices/logs:/app/logs
+    networks:
+      - wfm-network
+
+  config-service:
+    build:
+      context: ./wfmServices
+      dockerfile: Dockerfile
+    container_name: wfm_config_service
+    restart: unless-stopped
+    ports:
+      - "8002:8002"
+    environment:
+      - MONGODB_URL=mongodb+srv://wfmadmin:tsarolabs%4012345%23@wfmdb.cvkb04l.mongodb.net/?retryWrites=true&w=majority&appName=wfmDB
+      - REDIS_URL=redis://default:kIdJfI3xoLxHiKFnCrkGBYffiDla8Y9h@redis-15514.c56.east-us.azure.redns.redis-cloud.com:15514
+      - DATABASE_NAME=wfm
+      - JWT_SECRET_KEY=wfmv4-super-secret-jwt-key-change-in-production
+      - ENVIRONMENT=local
+      - ENV_FILE=env.local
+    volumes:
+      - ./wfmServices/logs:/app/logs
+    networks:
+      - wfm-network
+
+  rules-service:
+    build:
+      context: ./wfmServices
+      dockerfile: Dockerfile
+    container_name: wfm_rules_service
+    restart: unless-stopped
+    ports:
+      - "8003:8003"
+    entrypoint: ["python"]
+    command: ["-m", "rules_service.main"]
+    environment:
+      - MONGODB_URL=mongodb+srv://wfmadmin:tsarolabs%4012345%23@wfmdb.cvkb04l.mongodb.net/?retryWrites=true&w=majority&appName=wfmDB
+      - REDIS_URL=redis://default:kIdJfI3xoLxHiKFnCrkGBYffiDla8Y9h@redis-15514.c56.east-us.azure.redns.redis-cloud.com:15514
+      - DATABASE_NAME=wfm
+      - JWT_SECRET_KEY=wfmv4-super-secret-jwt-key-change-in-production
+      - ENVIRONMENT=local
+      - ENV_FILE=env.local
+    volumes:
+      - ./wfmServices/logs:/app/logs
+    networks:
+      - wfm-network
+
+  order-service:
+    build:
+      context: ./wfmServices
+      dockerfile: Dockerfile
+    container_name: wfm_order_service
+    restart: unless-stopped
+    ports:
+      - "8008:8008"
+    entrypoint: ["python"]
+    command: ["-m", "order_service.main"]
+    environment:
+      - MONGODB_URL=mongodb+srv://wfmadmin:tsarolabs%4012345%23@wfmdb.cvkb04l.mongodb.net/?retryWrites=true&w=majority&appName=wfmDB
+      - REDIS_URL=redis://default:kIdJfI3xoLxHiKFnCrkGBYffiDla8Y9h@redis-15514.c56.east-us.azure.redns.redis-cloud.com:15514
+      - DATABASE_NAME=wfm
+      - JWT_SECRET_KEY=wfmv4-super-secret-jwt-key-change-in-production
+      - ENVIRONMENT=local
+      - ENV_FILE=env.local
+    volumes:
+      - ./wfmServices/logs:/app/logs
+    networks:
+      - wfm-network
+
+  scheduler-service:
+    build:
+      context: ./wfmServices
+      dockerfile: Dockerfile
+    container_name: wfm_scheduler_service
+    restart: unless-stopped
+    ports:
+      - "8004:8004"
+    entrypoint: ["python"]
+    command: ["-m", "scheduler_service.main"]
+    environment:
+      - MONGODB_URL=mongodb+srv://wfmadmin:tsarolabs%4012345%23@wfmdb.cvkb04l.mongodb.net/?retryWrites=true&w=majority&appName=wfmDB
+      - REDIS_URL=redis://default:kIdJfI3xoLxHiKFnCrkGBYffiDla8Y9h@redis-15514.c56.east-us.azure.redns.redis-cloud.com:15514
+      - DATABASE_NAME=wfm
+      - JWT_SECRET_KEY=wfmv4-super-secret-jwt-key-change-in-production
+      - ENVIRONMENT=local
+      - ENV_FILE=env.local
+    volumes:
+      - ./wfmServices/logs:/app/logs
+    networks:
+      - wfm-network
+
+  issue-service:
+    build:
+      context: ./wfmServices
+      dockerfile: Dockerfile
+    container_name: wfm_issue_service
+    restart: unless-stopped
+    ports:
+      - "8005:8005"
+    entrypoint: ["python"]
+    command: ["-m", "issue_service.main"]
+    environment:
+      - MONGODB_URL=mongodb+srv://wfmadmin:tsarolabs%4012345%23@wfmdb.cvkb04l.mongodb.net/?retryWrites=true&w=majority&appName=wfmDB
+      - REDIS_URL=redis://default:kIdJfI3xoLxHiKFnCrkGBYffiDla8Y9h@redis-15514.c56.east-us.azure.redns.redis-cloud.com:15514
+      - DATABASE_NAME=wfm
+      - JWT_SECRET_KEY=wfmv4-super-secret-jwt-key-change-in-production
+      - ENVIRONMENT=local
+      - ENV_FILE=env.local
+    volumes:
+      - ./wfmServices/logs:/app/logs
+    networks:
+      - wfm-network
+
+  analytics-service:
+    build:
+      context: ./wfmServices
+      dockerfile: Dockerfile
+    container_name: wfm_analytics_service
+    restart: unless-stopped
+    ports:
+      - "8006:8006"
+    environment:
+      - MONGODB_URL=mongodb+srv://wfmadmin:tsarolabs%4012345%23@wfmdb.cvkb04l.mongodb.net/?retryWrites=true&w=majority&appName=wfmDB
+      - REDIS_URL=redis://default:kIdJfI3xoLxHiKFnCrkGBYffiDla8Y9h@redis-15514.c56.east-us.azure.redns.redis-cloud.com:15514
+      - DATABASE_NAME=wfm
+      - JWT_SECRET_KEY=wfmv4-super-secret-jwt-key-change-in-production
+      - ENVIRONMENT=local
+      - ENV_FILE=env.local
+    volumes:
+      - ./wfmServices/logs:/app/logs
+    networks:
+      - wfm-network
+
+  dashboard-service:
+    build:
+      context: ./wfmServices
+      dockerfile: Dockerfile
+    container_name: wfm_dashboard_service
+    restart: unless-stopped
+    ports:
+      - "8007:8007"
+    entrypoint: ["python"]
+    command: ["-m", "dashboard_service.main"]
+    environment:
+      - MONGODB_URL=mongodb+srv://wfmadmin:tsarolabs%4012345%23@wfmdb.cvkb04l.mongodb.net/?retryWrites=true&w=majority&appName=wfmDB
+      - REDIS_URL=redis://default:kIdJfI3xoLxHiKFnCrkGBYffiDla8Y9h@redis-15514.c56.east-us.azure.redns.redis-cloud.com:15514
+      - DATABASE_NAME=wfm
+      - JWT_SECRET_KEY=wfmv4-super-secret-jwt-key-change-in-production
+      - ENVIRONMENT=local
+      - ENV_FILE=env.local
+    volumes:
+      - ./wfmServices/logs:/app/logs
+    networks:
+      - wfm-network
+
+  # Frontend Application
+  wfmapp:
+    build:
+      context: ./wfmApp
+      dockerfile: Dockerfile
+    container_name: wfm_frontend
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - NEXT_PUBLIC_AUTH_SERVICE_URL=http://localhost:8001
+      - NEXT_PUBLIC_API_GATEWAY_URL=http://localhost:8000
+      - NEXT_PUBLIC_CONFIG_SERVICE_URL=http://localhost:8002
+      - NEXT_PUBLIC_RULES_SERVICE_URL=http://localhost:8003
+      - NEXT_PUBLIC_SCHEDULER_SERVICE_URL=http://localhost:8004
+      - NEXT_PUBLIC_ISSUE_SERVICE_URL=http://localhost:8005
+      - NEXT_PUBLIC_ANALYTICS_SERVICE_URL=http://localhost:8006
+      - NEXT_PUBLIC_DASHBOARD_SERVICE_URL=http://localhost:8007
+      - NEXT_PUBLIC_ORDER_SERVICE_URL=http://localhost:8008
+      - NEXT_PUBLIC_INT_SERVICES_URL=http://localhost:8082
+      - NEXT_PUBLIC_PROCESS_ENGINE_URL=http://localhost:8090
+      - NODE_ENV=development
+      - ENVIRONMENT=local
+    networks:
+      - wfm-network
+    depends_on:
+      - api-gateway
+      - auth-service
+      - wfm-process
+      - int-services
+
+networks:
+  wfm-network:
+    driver: bridge
+
+volumes:
+  postgres_data:
+  redis_data:
+  workflow_storage:
+  wfm_logs:

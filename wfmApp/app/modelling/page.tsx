@@ -2,7 +2,7 @@
 
 import React, { useState } from 'react';
 import { AppShell } from '@/components/app-shell';
-import BpmnModelerComponent from '@/components/modelling/BpmnModeler';
+import BpmnModelerComponent from '@/components/modelling/bpmn-modeler';
 
 export default function ModellingPage() {
   const [showModeler, setShowModeler] = useState(false);
@@ -20,10 +20,32 @@ export default function ModellingPage() {
     setShowBpmnEditor(false);
   };
 
-  const handleSaveWorkflow = (xml: string) => {
-    console.log('Workflow saved:', xml);
-    // Here you would typically send the XML to your backend
-    alert('Workflow saved successfully! Check console for XML content.');
+  const handleSaveWorkflow = async (xml: string, svg?: string) => {
+    try {
+      const processEngineUrl = process.env.NEXT_PUBLIC_PROCESS_ENGINE_URL || 'http://localhost:8090';
+      const response = await fetch(`${processEngineUrl}/workflows`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          name: `Workflow_${Date.now()}`,
+          version: '1.0',
+          bpmn_xml: xml,
+          description: 'Workflow created via WFM App'
+        })
+      });
+
+      if (response.ok) {
+        const result = await response.json();
+        alert(`Workflow saved successfully! ID: ${result.id}`);
+      } else {
+        throw new Error('Failed to save workflow');
+      }
+    } catch (error) {
+      console.error('Error saving workflow:', error);
+      alert('Failed to save workflow. Please try again.');
+    }
   };
 
   if (showBpmnEditor) {

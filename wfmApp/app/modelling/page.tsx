@@ -1,8 +1,16 @@
 "use client"
 
 import React, { useState } from 'react';
+import dynamic from 'next/dynamic';
 import { AppShell } from '@/components/app-shell';
-import BpmnModelerComponent from '@/components/modelling/BpmnModeler';
+
+const BpmnModelerComponent = dynamic(
+  () => import('@/components/modelling/BpmnModeler'),
+  { 
+    ssr: false,
+    loading: () => <div className="flex items-center justify-center h-96">Loading WFM Modeler...</div>
+  }
+);
 
 export default function ModellingPage() {
   const [showModeler, setShowModeler] = useState(false);
@@ -28,7 +36,7 @@ export default function ModellingPage() {
 
   if (showBpmnEditor) {
     return (
-      <AppShell title="BPMN Workflow Editor" subtitle="Create and edit BPMN workflows">
+      <AppShell title="WFM Workflow Editor" subtitle="Create and edit WFM workflows">
         <BpmnModelerComponent
           onSave={handleSaveWorkflow}
           onClose={handleCloseBpmnEditor}
@@ -39,11 +47,11 @@ export default function ModellingPage() {
 
   if (showModeler) {
     return (
-      <AppShell title="BPMN Modeler" subtitle="Workflow management and modeling">
+      <AppShell title="WFM Modeler" subtitle="WorkForce Management and Modeling">
         <div className="bg-white shadow rounded-lg p-6">
           <div className="flex items-center justify-between mb-6">
             <h2 className="text-lg font-medium text-gray-900">
-              BPMN Modeler
+              WFM Modeler
             </h2>
             <button
               onClick={() => setShowModeler(false)}
@@ -59,16 +67,16 @@ export default function ModellingPage() {
               </svg>
             </div>
             <h3 className="text-lg font-medium text-gray-900 mb-2">
-              Create New BPMN Workflow
+              Create New WFM Process
             </h3>
             <p className="text-gray-500 mb-4">
-              Start building your workflow by creating a new BPMN diagram
+              Start building your process by creating a new WFM diagram
             </p>
             <button 
               onClick={handleCreateWorkflow}
               className="bg-blue-600 hover:bg-blue-700 text-white font-medium py-2 px-4 rounded"
             >
-              Create New Workflow
+              Create New Process
             </button>
           </div>
         </div>
@@ -77,13 +85,13 @@ export default function ModellingPage() {
   }
 
   return (
-    <AppShell title="BPMN Workflow Engine" subtitle="Business Process Model and Notation">
+    <AppShell title="WFM Workflow Engine" subtitle="WorkForce Management and Modeling">
       <div className="bg-white shadow rounded-lg p-6">
         <h2 className="text-lg font-medium text-gray-900 mb-4">
-          Welcome to BPMN Workflow Engine
+          Welcome to WFM Workflow Engine
         </h2>
         <p className="text-gray-600 mb-4">
-          This is a modern, cloud-native BPMN workflow execution engine integrated into your workforce management system.
+          This is a modern, cloud-native WFM process execution engine integrated into your workforce management system.
         </p>
         <div className="mt-4">
           <button 

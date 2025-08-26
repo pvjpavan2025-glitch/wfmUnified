@@ -20,7 +20,6 @@ dist/
 downloads/
 eggs/
 .eggs/
-lib64/
 parts/
 sdist/
 var/
@@ -286,8 +285,6 @@ dist/
 downloads/
 eggs/
 .eggs/
-lib/
-lib64/
 parts/
 sdist/
 var/

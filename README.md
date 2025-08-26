@@ -1,5 +1,7 @@
 # WFM Unified Application
 
+[![Build Status](https://dev.azure.com/tsaro/WFM/_apis/build/status%2FwfmUnified?branchName=main)](https://dev.azure.com/tsaro/WFM/_build/latest?definitionId=4&branchName=main)
+
 This repository contains the integrated Workforce Management (WFM) system with BPMN workflow modeling capabilities.
 
 ## Architecture Overview

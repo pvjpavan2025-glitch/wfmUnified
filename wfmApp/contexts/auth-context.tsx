@@ -2,11 +2,11 @@
 
 import React, { createContext, useContext, useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
-import { authService, type User, type LoginCredentials } from '../lib/auth-service'
+import { authService, type User, type LoginCredentials } from '../services/auth-service'
 
 interface AuthContextType {
   user: User | null
-  login: (username: string, password: string, tenant_id: string) => Promise<boolean>
+  login: (username: string, password: string) => Promise<boolean>
   logout: () => void
   isLoading: boolean
 }
@@ -68,12 +68,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return '/dashboard';
   };
 
-  const login = async (username: string, password: string, tenant_id: string): Promise<boolean> => {
+  const login = async (username: string, password: string): Promise<boolean> => {
     setIsLoading(true)
     
     try {
       console.log('AuthContext: Attempting login...');
-      const response = await authService.login({ username, password, tenant_id });
+      const response = await authService.login({ username, password });
       console.log('AuthContext: Login successful, user:', response.user);
       console.log('AuthContext: Token stored:', !!authService.getToken());
       console.log('AuthContext: Token value from authService:', authService.getToken());

@@ -22,7 +22,26 @@ services:
       timeout: 10s
       retries: 3
 
-  # Redis for local caching
+  # MongoDB Database
+  wfm-mongodb:
+    image: mongo:7
+    container_name: wfm_mongodb
+    restart: unless-stopped
+    ports:
+      - "27017:27017"
+    environment:
+      - MONGO_INITDB_ROOT_USERNAME=wfmadmin
+      - MONGO_INITDB_ROOT_PASSWORD=wfmpassword123
+      - MONGO_INITDB_DATABASE=wfm
+    volumes:
+      - mongodb_data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Redis Cache
   wfm-redis:
     image: redis:7-alpine
     container_name: wfm_redis
@@ -31,8 +50,6 @@ services:
       - "6379:6379"
     volumes:
       - redis_data:/data
-    networks:
-      - wfm-network
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 30s
@@ -69,6 +86,8 @@ services:
         condition: service_healthy
       wfm-redis:
         condition: service_healthy
+      wfm-mongodb:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8090/health"]
       interval: 30s
@@ -85,8 +104,8 @@ services:
     ports:
       - "8082:8082"
     environment:
-      - MONGODB_URL=mongodb+srv://wfmadmin:tsarolabs%4012345%23@wfmdb.cvkb04l.mongodb.net/?retryWrites=true&w=majority&appName=wfmDB
-      - REDIS_URL=redis://default:kIdJfI3xoLxHiKFnCrkGBYffiDla8Y9h@redis-15514.c56.east-us.azure.redns.redis-cloud.com:15514
+      - MONGODB_URL=mongodb://wfmadmin:wfmpassword123@wfm-mongodb:27017/wfm?authSource=admin
+      - REDIS_URL=redis://wfm-redis:6379/0
       - DATABASE_NAME=wfm
       - JWT_SECRET_KEY=wfmv4-super-secret-jwt-key-change-in-production
       - ENVIRONMENT=local
@@ -103,43 +122,26 @@ services:
   # Backend Services (from existing docker-compose.integrated.yml)
   api-gateway:
     build:
-      context: ./wfmServices
+      context: ./simple-auth
       dockerfile: Dockerfile
     container_name: wfm_api_gateway
     restart: unless-stopped
     ports:
       - "8000:8000"
-    environment:
-      - MONGODB_URL=mongodb+srv://wfmadmin:tsarolabs%4012345%23@wfmdb.cvkb04l.mongodb.net/?retryWrites=true&w=majority&appName=wfmDB
-      - REDIS_URL=redis://default:kIdJfI3xoLxHiKFnCrkGBYffiDla8Y9h@redis-15514.c56.east-us.azure.redns.redis-cloud.com:15514
-      - DATABASE_NAME=wfm
-      - JWT_SECRET_KEY=wfmv4-super-secret-jwt-key-change-in-production
-      - ENVIRONMENT=local
-      - ENV_FILE=env.local
-      - PROCESS_ENGINE_URL=http://wfm-process:8090
-      - INT_SERVICES_URL=http://int-services:8082
-    volumes:
-      - ./wfmServices/logs:/app/logs
+    command: ["uvicorn", "proxy:app", "--host", "0.0.0.0", "--port", "8000"]
     networks:
       - wfm-network
+    depends_on:
+      - auth-service
 
   auth-service:
     build:
-      context: ./wfmServices
+      context: ./simple-auth
       dockerfile: Dockerfile
     container_name: wfm_auth_service
     restart: unless-stopped
     ports:
       - "8001:8001"
-    environment:
-      - MONGODB_URL=mongodb+srv://wfmadmin:tsarolabs%4012345%23@wfmdb.cvkb04l.mongodb.net/?retryWrites=true&w=majority&appName=wfmDB
-      - REDIS_URL=redis://default:kIdJfI3xoLxHiKFnCrkGBYffiDla8Y9h@redis-15514.c56.east-us.azure.redns.redis-cloud.com:15514
-      - DATABASE_NAME=wfm
-      - JWT_SECRET_KEY=wfmv4-super-secret-jwt-key-change-in-production
-      - ENVIRONMENT=local
-      - ENV_FILE=env.local
-    volumes:
-      - ./wfmServices/logs:/app/logs
     networks:
       - wfm-network
 
@@ -152,8 +154,8 @@ services:
     ports:
       - "8002:8002"
     environment:
-      - MONGODB_URL=mongodb+srv://wfmadmin:tsarolabs%4012345%23@wfmdb.cvkb04l.mongodb.net/?retryWrites=true&w=majority&appName=wfmDB
-      - REDIS_URL=redis://default:kIdJfI3xoLxHiKFnCrkGBYffiDla8Y9h@redis-15514.c56.east-us.azure.redns.redis-cloud.com:15514
+      - MONGODB_URL=mongodb://wfmadmin:wfmpassword123@wfm-mongodb:27017/wfm?authSource=admin
+      - REDIS_URL=redis://wfm-redis:6379/0
       - DATABASE_NAME=wfm
       - JWT_SECRET_KEY=wfmv4-super-secret-jwt-key-change-in-production
       - ENVIRONMENT=local
@@ -174,8 +176,8 @@ services:
     entrypoint: ["python"]
     command: ["-m", "rules_service.main"]
     environment:
-      - MONGODB_URL=mongodb+srv://wfmadmin:tsarolabs%4012345%23@wfmdb.cvkb04l.mongodb.net/?retryWrites=true&w=majority&appName=wfmDB
-      - REDIS_URL=redis://default:kIdJfI3xoLxHiKFnCrkGBYffiDla8Y9h@redis-15514.c56.east-us.azure.redns.redis-cloud.com:15514
+      - MONGODB_URL=mongodb://wfmadmin:wfmpassword123@wfm-mongodb:27017/wfm?authSource=admin
+      - REDIS_URL=redis://wfm-redis:6379/0
       - DATABASE_NAME=wfm
       - JWT_SECRET_KEY=wfmv4-super-secret-jwt-key-change-in-production
       - ENVIRONMENT=local
@@ -196,8 +198,8 @@ services:
     entrypoint: ["python"]
     command: ["-m", "order_service.main"]
     environment:
-      - MONGODB_URL=mongodb+srv://wfmadmin:tsarolabs%4012345%23@wfmdb.cvkb04l.mongodb.net/?retryWrites=true&w=majority&appName=wfmDB
-      - REDIS_URL=redis://default:kIdJfI3xoLxHiKFnCrkGBYffiDla8Y9h@redis-15514.c56.east-us.azure.redns.redis-cloud.com:15514
+      - MONGODB_URL=mongodb://wfmadmin:wfmpassword123@wfm-mongodb:27017/wfm?authSource=admin
+      - REDIS_URL=redis://wfm-redis:6379/0
       - DATABASE_NAME=wfm
       - JWT_SECRET_KEY=wfmv4-super-secret-jwt-key-change-in-production
       - ENVIRONMENT=local
@@ -218,8 +220,8 @@ services:
     entrypoint: ["python"]
     command: ["-m", "scheduler_service.main"]
     environment:
-      - MONGODB_URL=mongodb+srv://wfmadmin:tsarolabs%4012345%23@wfmdb.cvkb04l.mongodb.net/?retryWrites=true&w=majority&appName=wfmDB
-      - REDIS_URL=redis://default:kIdJfI3xoLxHiKFnCrkGBYffiDla8Y9h@redis-15514.c56.east-us.azure.redns.redis-cloud.com:15514
+      - MONGODB_URL=mongodb://wfmadmin:wfmpassword123@wfm-mongodb:27017/wfm?authSource=admin
+      - REDIS_URL=redis://wfm-redis:6379/0
       - DATABASE_NAME=wfm
       - JWT_SECRET_KEY=wfmv4-super-secret-jwt-key-change-in-production
       - ENVIRONMENT=local
@@ -240,8 +242,8 @@ services:
     entrypoint: ["python"]
     command: ["-m", "issue_service.main"]
     environment:
-      - MONGODB_URL=mongodb+srv://wfmadmin:tsarolabs%4012345%23@wfmdb.cvkb04l.mongodb.net/?retryWrites=true&w=majority&appName=wfmDB
-      - REDIS_URL=redis://default:kIdJfI3xoLxHiKFnCrkGBYffiDla8Y9h@redis-15514.c56.east-us.azure.redns.redis-cloud.com:15514
+      - MONGODB_URL=mongodb://wfmadmin:wfmpassword123@wfm-mongodb:27017/wfm?authSource=admin
+      - REDIS_URL=redis://wfm-redis:6379/0
       - DATABASE_NAME=wfm
       - JWT_SECRET_KEY=wfmv4-super-secret-jwt-key-change-in-production
       - ENVIRONMENT=local
@@ -260,8 +262,8 @@ services:
     ports:
       - "8006:8006"
     environment:
-      - MONGODB_URL=mongodb+srv://wfmadmin:tsarolabs%4012345%23@wfmdb.cvkb04l.mongodb.net/?retryWrites=true&w=majority&appName=wfmDB
-      - REDIS_URL=redis://default:kIdJfI3xoLxHiKFnCrkGBYffiDla8Y9h@redis-15514.c56.east-us.azure.redns.redis-cloud.com:15514
+      - MONGODB_URL=mongodb://wfmadmin:wfmpassword123@wfm-mongodb:27017/wfm?authSource=admin
+      - REDIS_URL=redis://wfm-redis:6379/0
       - DATABASE_NAME=wfm
       - JWT_SECRET_KEY=wfmv4-super-secret-jwt-key-change-in-production
       - ENVIRONMENT=local
@@ -282,8 +284,8 @@ services:
     entrypoint: ["python"]
     command: ["-m", "dashboard_service.main"]
     environment:
-      - MONGODB_URL=mongodb+srv://wfmadmin:tsarolabs%4012345%23@wfmdb.cvkb04l.mongodb.net/?retryWrites=true&w=majority&appName=wfmDB
-      - REDIS_URL=redis://default:kIdJfI3xoLxHiKFnCrkGBYffiDla8Y9h@redis-15514.c56.east-us.azure.redns.redis-cloud.com:15514
+      - MONGODB_URL=mongodb://wfmadmin:wfmpassword123@wfm-mongodb:27017/wfm?authSource=admin
+      - REDIS_URL=redis://wfm-redis:6379/0
       - DATABASE_NAME=wfm
       - JWT_SECRET_KEY=wfmv4-super-secret-jwt-key-change-in-production
       - ENVIRONMENT=local
@@ -330,6 +332,7 @@ networks:
 
 volumes:
   postgres_data:
+  mongodb_data:
   redis_data:
   workflow_storage:
   wfm_logs:

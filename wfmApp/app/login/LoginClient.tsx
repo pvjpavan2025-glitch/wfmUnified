@@ -10,25 +10,23 @@ import { Loader2, Settings, CalendarDays, BarChart3, Eye, EyeOff, HelpCircle } f
 export default function LoginClient() {
   const [username, setUsername] = useState('admin1')
   const [password, setPassword] = useState('Admin123!')
-  const [tenant_id, setTenantId] = useState('689b864f6707fa5d44d5bf7d')
   const [error, setError] = useState('')
   const [showPassword, setShowPassword] = useState(false)
   const [remember, setRemember] = useState(false)
-  const [showAdvanced, setShowAdvanced] = useState(false)
   const { login, isLoading } = useAuth()
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setError('')
 
-    if (!username || !password || !tenant_id) {
-      setError('Please enter username, password, and tenant ID')
+    if (!username || !password) {
+      setError('Please enter username and password')
       return
     }
 
-    const success = await login(username, password, tenant_id)
+    const success = await login(username, password)
     if (!success) {
-      setError('Invalid username, password, or tenant ID')
+      setError('Invalid username or password')
     }
   }
 
@@ -167,24 +165,7 @@ export default function LoginClient() {
                   <input type="checkbox" className="size-4 rounded border-white/20 bg-white/10 text-orange-500 focus:ring-orange-400" checked={remember} onChange={(e) => setRemember(e.target.checked)} />
                   <span className="text-white/80">Remember me</span>
                 </label>
-                <button type="button" onClick={() => setShowAdvanced((s) => !s)} className="text-white/70 underline-offset-4 hover:text-white hover:underline">
-                  {showAdvanced ? 'Hide' : 'Advanced'}
-                </button>
               </div>
-
-              {showAdvanced && (
-                <div className="pt-1">
-                  <label className="mb-1 block text-sm text-white/70">Tenant ID</label>
-                  <Input
-                    type="text"
-                    placeholder="Tenant ID"
-                    value={tenant_id}
-                    onChange={(e) => setTenantId(e.target.value)}
-                    className="w-full rounded-xl border-white/10 bg-white/10 text-white placeholder-white/50 backdrop-blur-sm focus-visible:ring-2 focus-visible:ring-orange-400"
-                    disabled={isLoading}
-                  />
-                </div>
-              )}
 
               {error && (
                 <Alert className="border-red-400/40 bg-red-500/10">

@@ -7,7 +7,17 @@ import { Progress } from "@/components/ui/progress";
 import { ArrowUpIcon, ArrowDownIcon } from "@heroicons/react/24/solid";
 
 interface DashboardMetrics {
-  active_jobs: {
+  active_orders: {
+    count: number;
+    change_percentage: number;
+    change_direction: "up" | "down";
+  };
+  running_processes: {
+    count: number;
+    change_percentage: number;
+    change_direction: "up" | "down";
+  };
+  pending_tasks: {
     count: number;
     change_percentage: number;
     change_direction: "up" | "down";
@@ -17,18 +27,13 @@ interface DashboardMetrics {
     change_percentage: number;
     change_direction: "up" | "down";
   };
-  scheduled_today: {
-    count: number;
-    change_percentage: number;
-    change_direction: "up" | "down";
-  };
   completion_rate: {
     percentage: number;
     change_percentage: number;
     change_direction: "up" | "down";
   };
-  total_jobs: number;
-  completed_jobs: number;
+  total_orders: number;
+  completed_orders: number;
 }
 
 interface RecentJob {
@@ -201,20 +206,60 @@ export default function DashboardContent() {
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
         <Card className="border border-gray-200 bg-white">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Active Jobs</CardTitle>
-            {metrics?.active_jobs.change_direction === "up" ? (
+            <CardTitle className="text-sm font-medium">Active Orders</CardTitle>
+            {metrics?.active_orders.change_direction === "up" ? (
               <ArrowUpIcon className="h-4 w-4 text-green-600" />
             ) : (
               <ArrowDownIcon className="h-4 w-4 text-red-600" />
             )}
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{metrics?.active_jobs.count || 0}</div>
+            <div className="text-2xl font-bold">{metrics?.active_orders.count || 0}</div>
             <p className={`text-xs ${
-              metrics?.active_jobs.change_direction === "up" ? "text-green-600" : "text-red-600"
+              metrics?.active_orders.change_direction === "up" ? "text-green-600" : "text-red-600"
             }`}>
-              {metrics?.active_jobs.change_direction === "up" ? "+" : "-"}
-              {Math.abs(metrics?.active_jobs.change_percentage || 0)}% from last month
+              {metrics?.active_orders.change_direction === "up" ? "+" : "-"}
+              {Math.abs(metrics?.active_orders.change_percentage || 0)}% from last month
+            </p>
+          </CardContent>
+        </Card>
+
+        <Card className="border border-gray-200 bg-white">
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Running Processes</CardTitle>
+            {metrics?.running_processes.change_direction === "up" ? (
+              <ArrowUpIcon className="h-4 w-4 text-green-600" />
+            ) : (
+              <ArrowDownIcon className="h-4 w-4 text-red-600" />
+            )}
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">{metrics?.running_processes.count || 0}</div>
+            <p className={`text-xs ${
+              metrics?.running_processes.change_direction === "up" ? "text-green-600" : "text-red-600"
+            }`}>
+              {metrics?.running_processes.change_direction === "up" ? "+" : "-"}
+              {Math.abs(metrics?.running_processes.change_percentage || 0)}% from last month
+            </p>
+          </CardContent>
+        </Card>
+
+        <Card className="border border-gray-200 bg-white">
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Pending Tasks</CardTitle>
+            {metrics?.pending_tasks.change_direction === "up" ? (
+              <ArrowUpIcon className="h-4 w-4 text-green-600" />
+            ) : (
+              <ArrowDownIcon className="h-4 w-4 text-red-600" />
+            )}
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">{metrics?.pending_tasks.count || 0}</div>
+            <p className={`text-xs ${
+              metrics?.pending_tasks.change_direction === "up" ? "text-green-600" : "text-red-600"
+            }`}>
+              {metrics?.pending_tasks.change_direction === "up" ? "+" : "-"}
+              {Math.abs(metrics?.pending_tasks.change_percentage || 0)}% from last month
             </p>
           </CardContent>
         </Card>
@@ -235,46 +280,6 @@ export default function DashboardContent() {
             }`}>
               {metrics?.available_technicians.change_direction === "up" ? "+" : "-"}
               {Math.abs(metrics?.available_technicians.change_percentage || 0)}% from last month
-            </p>
-          </CardContent>
-        </Card>
-
-        <Card className="border border-gray-200 bg-white">
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Scheduled Today</CardTitle>
-            {metrics?.scheduled_today.change_direction === "up" ? (
-              <ArrowUpIcon className="h-4 w-4 text-green-600" />
-            ) : (
-              <ArrowDownIcon className="h-4 w-4 text-red-600" />
-            )}
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{metrics?.scheduled_today.count || 0}</div>
-            <p className={`text-xs ${
-              metrics?.scheduled_today.change_direction === "up" ? "text-green-600" : "text-red-600"
-            }`}>
-              {metrics?.scheduled_today.change_direction === "up" ? "+" : "-"}
-              {Math.abs(metrics?.scheduled_today.change_percentage || 0)}% from last month
-            </p>
-          </CardContent>
-        </Card>
-
-        <Card className="border border-gray-200 bg-white">
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Completion Rate</CardTitle>
-            {metrics?.completion_rate.change_direction === "up" ? (
-              <ArrowUpIcon className="h-4 w-4 text-green-600" />
-            ) : (
-              <ArrowDownIcon className="h-4 w-4 text-red-600" />
-            )}
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{metrics?.completion_rate.percentage || 0}%</div>
-            <p className={`text-xs ${
-              metrics?.completion_rate.change_direction === "up" ? "text-green-600" : "text-red-600"
-            }`}>
-              {metrics?.completion_rate.change_direction === "up" ? "+" : "-"}
-              {Math.abs(metrics?.completion_rate.change_percentage || 0)}% from last month
             </p>
           </CardContent>
         </Card>

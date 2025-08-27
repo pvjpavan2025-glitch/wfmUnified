@@ -26,11 +26,14 @@ class StatusEnum(str, Enum):
     PENDING = "pending"
     READY = "ready"
     SCHEDULED = "scheduled"
+    IN_PROGRESS = "in_progress"
     COMPLETED = "completed"
     FAILED = "failed"
     CANCELLED = "cancelled"
     OPEN = "open"
     CLOSED = "closed"
+    PAUSED = "paused"
+    BLOCKED = "blocked"
 
 
 class PriorityEnum(str, Enum):
@@ -198,4 +201,41 @@ class Report(BaseEntity):
     parameters: Dict[str, Any] = Field(default_factory=dict)
     status: StatusEnum = Field(default=StatusEnum.PENDING)
     generated_at: Optional[datetime] = None
-    file_path: Optional[str] = None 
+    file_path: Optional[str] = None
+
+
+class Vendor(BaseEntity):
+    """Vendor model."""
+    name: str = Field(..., min_length=1, max_length=100)
+    description: Optional[str] = None
+    contact_email: EmailStr
+    contact_phone: Optional[str] = None
+    address: Optional[str] = None
+    status: StatusEnum = Field(default=StatusEnum.ACTIVE)
+    capabilities: List[str] = Field(default_factory=list)
+    service_areas: List[str] = Field(default_factory=list)
+
+
+class Technician(BaseEntity):
+    """Technician model - belongs to a vendor."""
+    name: str = Field(..., min_length=1, max_length=100)
+    email: EmailStr
+    phone: Optional[str] = None
+    vendor_id: str = Field(..., description="ID of the vendor this technician belongs to")
+    skills: List[str] = Field(default_factory=list)
+    experience_years: int = Field(default=0, ge=0)
+    availability: Dict[str, Any] = Field(default_factory=dict)
+    status: StatusEnum = Field(default=StatusEnum.ACTIVE)
+    max_concurrent_tasks: int = Field(default=3, ge=1, le=10)
+    current_task_count: int = Field(default=0, ge=0)
+
+
+class Lead(BaseEntity):
+    """Lead/Manager model - manages technicians."""
+    name: str = Field(..., min_length=1, max_length=100)
+    email: EmailStr
+    phone: Optional[str] = None
+    vendor_id: str = Field(..., description="ID of the vendor this lead belongs to")
+    managed_technicians: List[str] = Field(default_factory=list, description="List of technician IDs managed by this lead")
+    status: StatusEnum = Field(default=StatusEnum.ACTIVE)
+    max_managed_technicians: int = Field(default=10, ge=1, le=50) 

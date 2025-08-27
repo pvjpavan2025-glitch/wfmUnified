@@ -11,7 +11,7 @@ class RulesClient:
         self.token = settings.rules_api_token
         self.stub = settings.rules_api_stub
 
-    async def create_order(self, payload: Dict[str, Any], orchestrate: bool = True, split_jobs: bool = False, auto_schedule: bool = True) -> Dict[str, Any]:
+    async def evaluate_order(self, payload: Dict[str, Any], orchestrate: bool = True, auto_schedule: bool = True) -> Dict[str, Any]:
         if self.stub:
             # Simulate a successful Rules API response
             return {
@@ -36,7 +36,7 @@ class RulesClient:
             token = jwt.encode(payload, settings.rules_jwt_secret, algorithm=settings.rules_jwt_alg)
         if token:
             headers["Authorization"] = f"Bearer {token}"
-        # Align with wfmServices rules-service endpoints; using /rules/evaluate to kick rules flow
+        # Use the new rules service endpoint for order-process evaluation
         url = f"{self.base_url}/rules/evaluate"
         async with httpx.AsyncClient(timeout=self.timeout) as client:
             r = await client.post(
@@ -44,10 +44,14 @@ class RulesClient:
                 json={
                     "data": payload,
                     "orchestrate": orchestrate,
-                    "split_jobs": split_jobs,
                     "auto_schedule": auto_schedule,
+                    "tenant_id": payload.get("tenant_id", settings.rules_tenant_id)
                 },
                 headers=headers,
             )
             r.raise_for_status()
             return r.json()
+    
+    async def create_order(self, payload: Dict[str, Any], orchestrate: bool = True, split_jobs: bool = False, auto_schedule: bool = True) -> Dict[str, Any]:
+        """Legacy method for backward compatibility - delegates to evaluate_order."""
+        return await self.evaluate_order(payload, orchestrate, auto_schedule)

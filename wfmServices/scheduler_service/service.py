@@ -4,6 +4,7 @@ Business logic layer for Intelligent Scheduler Service.
 from typing import Optional, List, Dict, Any
 from datetime import datetime, timedelta
 import structlog
+import httpx
 import redis.asyncio as redis
 from .repository import JobRepository, AnalystRepository
 from .models import JobCreate, JobUpdate, AnalystCreate, AnalystUpdate, SchedulingRequest
@@ -19,6 +20,8 @@ class SchedulerService:
         self.analyst_repo = analyst_repo
         self.redis_client = redis_client
         self.cache_ttl = 300  # 5 minutes
+        self.process_service_url = "http://localhost:8008"  # process service
+        self.vendor_service_url = "http://localhost:8007"  # vendor service
     
     async def create_job(self, job_data: JobCreate, created_by: str) -> Dict[str, Any]:
         """Create a new job."""
@@ -101,62 +104,6 @@ class SchedulerService:
             logger.error(f"Failed to list jobs for tenant {tenant_id}: {str(e)}")
             return []
     
-    async def schedule_job(self, job_id: str, tenant_id: str) -> Dict[str, Any]:
-        """Schedule a job."""
-        try:
-            # Get job
-            job = await self.job_repo.get_job_by_id(job_id, tenant_id)
-            if not job:
-                raise ValueError(f"Job {job_id} not found")
-            
-            # Get available analysts
-            analysts = await self.analyst_repo.get_available_analysts(tenant_id)
-            if not analysts:
-                raise ValueError("No available analysts found")
-            
-            # Find best analyst for the job
-            best_analyst = await self._find_best_analyst(job, analysts)
-            if not best_analyst:
-                raise ValueError("No suitable analyst found for this job")
-            
-            # Calculate schedule
-            schedule = await self._calculate_schedule(job, best_analyst)
-            
-            # Update job with schedule
-            update_data = {
-                "assigned_analyst": best_analyst["id"],
-                "scheduled_start": schedule["start_time"],
-                "scheduled_end": schedule["end_time"],
-                "status": "scheduled"
-            }
-            
-            updated_job = await self.job_repo.update_job(job_id, tenant_id, update_data)
-            
-            # Create schedule record
-            schedule_data = {
-                "analyst_id": best_analyst["id"],
-                "job_id": job_id,
-                "start_time": schedule["start_time"],
-                "end_time": schedule["end_time"],
-                "tenant_id": tenant_id
-            }
-            
-            await self.job_repo.create_schedule(schedule_data)
-            
-            logger.info(f"Job {job_id} scheduled with analyst {best_analyst['name']}")
-            
-            return {
-                "job_id": job_id,
-                "analyst_id": best_analyst["id"],
-                "analyst_name": best_analyst["name"],
-                "start_time": schedule["start_time"],
-                "end_time": schedule["end_time"],
-                "confidence_score": schedule["confidence_score"]
-            }
-            
-        except Exception as e:
-            logger.error(f"Failed to schedule job {job_id}: {str(e)}")
-            raise
     
     async def create_analyst(self, analyst_data: AnalystCreate, created_by: str) -> Dict[str, Any]:
         """Create a new analyst."""
@@ -242,87 +189,236 @@ class SchedulerService:
             logger.error(f"Failed to list analysts for tenant {tenant_id}: {str(e)}")
             return []
     
-    async def _find_best_analyst(self, job: Dict[str, Any], analysts: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
-        """Find the best analyst for a job."""
+    async def schedule_task_instance(self, task_instance_id: str, tenant_id: str) -> Dict[str, Any]:
+        """Schedule a task instance using vendor service technicians."""
         try:
-            best_analyst = None
+            # Get task instance from process service
+            async with httpx.AsyncClient() as client:
+                task_response = await client.get(
+                    f"{self.process_service_url}/task-instances/{task_instance_id}"
+                )
+                
+                if task_response.status_code != 200:
+                    raise ValueError(f"Task instance {task_instance_id} not found")
+                
+                task_instance = task_response.json()
+                
+                # Get available technicians from vendor service
+                technicians_response = await client.get(
+                    f"{self.vendor_service_url}/technicians",
+                    params={"status": "available"}
+                )
+                
+                if technicians_response.status_code != 200:
+                    raise ValueError("Failed to get available technicians")
+                
+                technicians = technicians_response.json()
+                
+                if not technicians:
+                    raise ValueError("No available technicians found")
+                
+                # Find best technician for the task
+                best_technician = await self._find_best_technician(task_instance, technicians)
+                if not best_technician:
+                    raise ValueError("No suitable technician found for this task")
+                
+                # Get lead for the technician
+                lead_response = await client.get(
+                    f"{self.vendor_service_url}/technicians/{best_technician['id']}/lead"
+                )
+                
+                if lead_response.status_code != 200:
+                    raise ValueError(f"No lead found for technician {best_technician['id']}")
+                
+                lead = lead_response.json()
+                
+                # Calculate schedule
+                schedule = await self._calculate_task_schedule(task_instance, best_technician)
+                
+                # Assign task via vendor service
+                assignment_data = {
+                    "task_instance_id": task_instance_id,
+                    "technician_id": best_technician["id"],
+                    "lead_id": lead["id"],
+                    "scheduled_start": schedule["start_time"].isoformat(),
+                    "scheduled_end": schedule["end_time"].isoformat(),
+                    "notes": f"Auto-scheduled by scheduler service"
+                }
+                
+                assignment_response = await client.post(
+                    f"{self.vendor_service_url}/task-assignments",
+                    json=assignment_data
+                )
+                
+                if assignment_response.status_code != 200:
+                    raise ValueError("Failed to assign task to technician")
+                
+                assignment = assignment_response.json()
+                
+                # Update task instance with assignment
+                task_update = {
+                    "assigned_technician_id": best_technician["id"],
+                    "assigned_lead_id": lead["id"],
+                    "scheduled_start": schedule["start_time"].isoformat(),
+                    "scheduled_end": schedule["end_time"].isoformat(),
+                    "status": "scheduled"
+                }
+                
+                await client.put(
+                    f"{self.process_service_url}/task-instances/{task_instance_id}",
+                    json=task_update
+                )
+                
+                logger.info(f"Task {task_instance_id} scheduled with technician {best_technician['name']}")
+                
+                return {
+                    "task_instance_id": task_instance_id,
+                    "technician_id": best_technician["id"],
+                    "technician_name": best_technician["name"],
+                    "lead_id": lead["id"],
+                    "lead_name": lead["name"],
+                    "start_time": schedule["start_time"],
+                    "end_time": schedule["end_time"],
+                    "confidence_score": schedule["confidence_score"],
+                    "assignment_id": assignment.get("id")
+                }
+                
+        except Exception as e:
+            logger.error(f"Failed to schedule task instance {task_instance_id}: {str(e)}")
+            raise
+    
+    async def schedule_multiple_tasks(self, task_instance_ids: List[str], tenant_id: str) -> List[Dict[str, Any]]:
+        """Schedule multiple task instances."""
+        results = []
+        
+        for task_id in task_instance_ids:
+            try:
+                result = await self.schedule_task_instance(task_id, tenant_id)
+                results.append(result)
+            except Exception as e:
+                logger.error(f"Failed to schedule task {task_id}: {str(e)}")
+                results.append({
+                    "task_instance_id": task_id,
+                    "error": str(e),
+                    "status": "failed"
+                })
+        
+        return results
+    
+    async def get_technician_schedule(self, technician_id: str, tenant_id: str, start_date: datetime, end_date: datetime) -> List[Dict[str, Any]]:
+        """Get schedule for a specific technician."""
+        try:
+            async with httpx.AsyncClient() as client:
+                # Get technician's assigned tasks from vendor service
+                response = await client.get(
+                    f"{self.vendor_service_url}/technicians/{technician_id}/task-assignments",
+                    params={
+                        "start_date": start_date.isoformat(),
+                        "end_date": end_date.isoformat()
+                    }
+                )
+                
+                if response.status_code == 200:
+                    return response.json()
+                else:
+                    logger.error(f"Failed to get schedule for technician {technician_id}")
+                    return []
+                    
+        except Exception as e:
+            logger.error(f"Error getting technician schedule: {str(e)}")
+            return []
+    
+    async def _find_best_technician(self, task_instance: Dict[str, Any], technicians: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+        """Find the best technician for a task instance."""
+        try:
+            best_technician = None
             best_score = 0.0
             
-            for analyst in analysts:
-                if analyst.get("status", "inactive") != "active":
-                    continue
-                
-                current_jobs = analyst.get("current_job_count", 0)
-                max_jobs = max(1, analyst.get("max_concurrent_jobs", 5))
-                if current_jobs >= max_jobs:
+            required_skills = task_instance.get("required_skills", [])
+            
+            for technician in technicians:
+                if technician.get("status", "inactive") != "available":
                     continue
                 
                 # Calculate score based on skills match, availability, and current workload
-                score = await self._calculate_analyst_score(job, analyst)
+                score = await self._calculate_technician_score(task_instance, technician, required_skills)
                 
                 if score > best_score:
                     best_score = score
-                    best_analyst = analyst
+                    best_technician = technician
             
-            return best_analyst
+            return best_technician
             
         except Exception as e:
-            logger.error(f"Error finding best analyst: {str(e)}")
+            logger.error(f"Error finding best technician: {str(e)}")
             return None
     
-    async def _calculate_analyst_score(self, job: Dict[str, Any], analyst: Dict[str, Any]) -> float:
-        """Calculate analyst suitability score for a job."""
+    async def _calculate_technician_score(self, task_instance: Dict[str, Any], technician: Dict[str, Any], required_skills: List[str]) -> float:
+        """Calculate technician suitability score for a task instance."""
         try:
             score = 0.0
             
-            # Skills match (40% weight)
-            if analyst["skills"]:
-                # This would check job requirements against analyst skills
-                skills_match = 0.5  # Placeholder
-                score += skills_match * 0.4
+            # Skills match (50% weight)
+            technician_skills = technician.get("skills", [])
+            if required_skills and technician_skills:
+                matching_skills = set(required_skills) & set(technician_skills)
+                skills_match = len(matching_skills) / len(required_skills) if required_skills else 1.0
+                score += skills_match * 0.5
+            elif not required_skills:
+                score += 0.5  # No specific skills required
             
             # Availability (30% weight)
-            availability_score = await self._calculate_availability_score(analyst)
+            availability_score = await self._calculate_technician_availability_score(technician)
             score += availability_score * 0.3
             
-            # Workload balance (20% weight)
-            current_jobs = analyst.get("current_job_count", 0)
-            max_jobs = max(1, analyst.get("max_concurrent_jobs", 5))
-            workload_score = 1.0 - (current_jobs / max_jobs)
-            score += workload_score * 0.2
-            
-            # Performance history (10% weight)
-            performance_score = 0.8  # Placeholder - would be based on historical data
-            score += performance_score * 0.1
+            # Experience level (20% weight)
+            experience_level = technician.get("experience_level", "junior")
+            experience_score = {"senior": 1.0, "mid": 0.7, "junior": 0.4}.get(experience_level, 0.4)
+            score += experience_score * 0.2
             
             return min(score, 1.0)
             
         except Exception as e:
-            logger.error(f"Error calculating analyst score: {str(e)}")
+            logger.error(f"Error calculating technician score: {str(e)}")
             return 0.0
     
-    async def _calculate_availability_score(self, analyst: Dict[str, Any]) -> float:
-        """Calculate analyst availability score."""
+    async def _calculate_technician_availability_score(self, technician: Dict[str, Any]) -> float:
+        """Calculate technician availability score."""
         try:
-            # This would check analyst availability against current time
-            # For now, return a placeholder score
-            return 0.8
+            # Check current workload
+            current_tasks = technician.get("current_task_count", 0)
+            max_tasks = technician.get("max_concurrent_tasks", 3)
+            
+            if current_tasks >= max_tasks:
+                return 0.0
+            
+            # Calculate availability based on workload
+            availability_score = 1.0 - (current_tasks / max_tasks)
+            return availability_score
             
         except Exception as e:
             logger.error(f"Error calculating availability score: {str(e)}")
             return 0.0
     
-    async def _calculate_schedule(self, job: Dict[str, Any], analyst: Dict[str, Any]) -> Dict[str, Any]:
-        """Calculate optimal schedule for job and analyst."""
+    async def _calculate_task_schedule(self, task_instance: Dict[str, Any], technician: Dict[str, Any]) -> Dict[str, Any]:
+        """Calculate optimal schedule for task instance and technician."""
         try:
-            # Start time would be based on analyst availability and current time
-            start_time = datetime.utcnow() + timedelta(hours=1)
+            # Start time based on technician availability and task priority
+            priority = task_instance.get("priority", "medium")
             
-            # End time based on SLA
-            end_time = start_time + timedelta(hours=job["sla_hours"])
+            if priority == "urgent":
+                start_time = datetime.utcnow() + timedelta(minutes=30)
+            elif priority == "high":
+                start_time = datetime.utcnow() + timedelta(hours=2)
+            else:
+                start_time = datetime.utcnow() + timedelta(hours=4)
+            
+            # End time based on estimated duration
+            estimated_duration = task_instance.get("estimated_duration_hours", 2)
+            end_time = start_time + timedelta(hours=estimated_duration)
             
             # Confidence score based on various factors
-            confidence_score = 0.85  # Placeholder
+            confidence_score = 0.8  # Placeholder - would be based on historical data and current conditions
             
             return {
                 "start_time": start_time,
@@ -331,5 +427,5 @@ class SchedulerService:
             }
             
         except Exception as e:
-            logger.error(f"Error calculating schedule: {str(e)}")
-            raise 
+            logger.error(f"Error calculating task schedule: {str(e)}")
+            raise

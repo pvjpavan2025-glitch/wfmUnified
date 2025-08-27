@@ -2,9 +2,10 @@
 
 import logging
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, HTTPException, Depends, UploadFile, File
+from fastapi import FastAPI, HTTPException, Depends, UploadFile, File, Body
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from typing import Dict, Any, Optional
 import uvicorn
 
 from .core.config import settings
@@ -184,13 +185,87 @@ async def upload_bpmn(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
+@app.post("/execute-process")
+async def execute_process(
+    request_data: Dict[str, Any] = Body(...)
+):
+    """Execute a BPMN process for an order."""
+    try:
+        workflow_engine: WorkflowEngine = app.state.workflow_engine
+        
+        # Extract required fields
+        order_id = request_data.get("order_id")
+        process_definition_key = request_data.get("process_definition_key")
+        bpmn_xml = request_data.get("bpmn_xml")
+        input_data = request_data.get("input_data", {})
+        tenant_id = request_data.get("tenant_id")
+        auto_assign_tasks = request_data.get("auto_assign_tasks", False)
+        
+        if not all([order_id, process_definition_key, bpmn_xml, tenant_id]):
+            raise HTTPException(
+                status_code=400, 
+                detail="Missing required fields: order_id, process_definition_key, bpmn_xml, tenant_id"
+            )
+        
+        # Create workflow definition from BPMN XML
+        workflow_def = await workflow_engine.create_workflow_definition(
+            bpmn_xml=bpmn_xml,
+            name=f"Process {process_definition_key} for Order {order_id}",
+            version="1.0.0",
+            process_id=process_definition_key
+        )
+        
+        # Start workflow instance
+        instance_id = f"{order_id}_{process_definition_key}_{tenant_id}"
+        workflow_instance = await workflow_engine.start_workflow(
+            workflow_definition=workflow_def,
+            input_data={
+                **input_data,
+                "order_id": order_id,
+                "tenant_id": tenant_id,
+                "process_definition_key": process_definition_key
+            },
+            instance_id=instance_id
+        )
+        
+        # Extract task information
+        tasks = []
+        for task_def in workflow_def.task_definitions:
+            task_info = {
+                "id": task_def.task_id,
+                "name": task_def.name,
+                "type": task_def.task_type,
+                "status": "pending",
+                "assignee": None,
+                "created_at": workflow_instance.created_at.isoformat() if hasattr(workflow_instance, 'created_at') else None
+            }
+            tasks.append(task_info)
+        
+        return {
+            "id": workflow_instance.instance_id,
+            "order_id": order_id,
+            "process_definition_key": process_definition_key,
+            "status": workflow_instance.status,
+            "tasks": tasks,
+            "tenant_id": tenant_id,
+            "auto_assign_tasks": auto_assign_tasks,
+            "created_at": workflow_instance.created_at.isoformat() if hasattr(workflow_instance, 'created_at') else None
+        }
+        
+    except WorkflowExecutionError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"Failed to execute process: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
 @app.post("/start-workflow/{workflow_id}")
 async def start_workflow(
     workflow_id: str,
     input_data: dict = None,
     instance_id: str = None
 ):
-    """Start a workflow instance."""
+    """Start a workflow instance (legacy endpoint)."""
     try:
         workflow_engine: WorkflowEngine = app.state.workflow_engine
         
@@ -245,6 +320,68 @@ async def get_workflow_status(instance_id: str):
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
+@app.post("/complete-task")
+async def complete_task(
+    request_data: Dict[str, Any] = Body(...)
+):
+    """Complete a task in a workflow instance."""
+    try:
+        workflow_engine: WorkflowEngine = app.state.workflow_engine
+        
+        instance_id = request_data.get("instance_id")
+        task_id = request_data.get("task_id")
+        output_data = request_data.get("output_data", {})
+        
+        if not all([instance_id, task_id]):
+            raise HTTPException(
+                status_code=400,
+                detail="Missing required fields: instance_id, task_id"
+            )
+        
+        success = await workflow_engine.complete_task(
+            instance_id=instance_id,
+            task_id=task_id,
+            output_data=output_data
+        )
+        
+        if not success:
+            raise HTTPException(
+                status_code=404,
+                detail="Task or workflow instance not found"
+            )
+        
+        return {
+            "message": "Task completed successfully",
+            "instance_id": instance_id,
+            "task_id": task_id
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to complete task: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@app.get("/process-instances/{instance_id}/tasks")
+async def get_process_tasks(instance_id: str):
+    """Get all tasks for a process instance."""
+    try:
+        workflow_engine: WorkflowEngine = app.state.workflow_engine
+        tasks = await workflow_engine.get_instance_tasks(instance_id)
+        
+        if tasks is None:
+            raise HTTPException(status_code=404, detail="Process instance not found")
+        
+        return tasks
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to get process tasks: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
 @app.post("/stop-workflow/{instance_id}")
 async def stop_workflow(instance_id: str):
     """Stop a workflow instance."""
@@ -261,6 +398,111 @@ async def stop_workflow(instance_id: str):
         raise
     except Exception as e:
         logger.error(f"Failed to stop workflow: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@app.post("/save-bpmn")
+async def save_bpmn(
+    request_data: Dict[str, Any] = Body(...)
+):
+    """Save BPMN diagram to database."""
+    try:
+        workflow_engine: WorkflowEngine = app.state.workflow_engine
+        
+        name = request_data.get("name")
+        bpmn_xml = request_data.get("bpmn_xml")
+        version = request_data.get("version", "1.0.0")
+        process_id = request_data.get("process_id")
+        
+        if not all([name, bpmn_xml]):
+            raise HTTPException(
+                status_code=400,
+                detail="Missing required fields: name, bpmn_xml"
+            )
+        
+        workflow_def = await workflow_engine.create_workflow_definition(
+            bpmn_xml=bpmn_xml,
+            name=name,
+            version=version,
+            process_id=process_id
+        )
+        
+        return {
+            "message": "BPMN diagram saved successfully",
+            "workflow_definition": {
+                "id": workflow_def.bpmn_id,
+                "name": workflow_def.name,
+                "version": workflow_def.version,
+                "process_id": workflow_def.process_id,
+                "task_count": len(workflow_def.task_definitions)
+            }
+        }
+        
+    except WorkflowExecutionError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"Failed to save BPMN diagram: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@app.get("/bpmn-diagrams")
+async def list_bpmn_diagrams():
+    """List all saved BPMN diagrams."""
+    try:
+        workflow_engine: WorkflowEngine = app.state.workflow_engine
+        diagrams = await workflow_engine.list_workflow_definitions()
+        
+        return {
+            "diagrams": [
+                {
+                    "id": diagram.bpmn_id,
+                    "name": diagram.name,
+                    "version": diagram.version,
+                    "process_id": diagram.process_id,
+                    "task_count": len(diagram.task_definitions),
+                    "is_executable": diagram.is_executable
+                }
+                for diagram in diagrams
+            ]
+        }
+        
+    except Exception as e:
+        logger.error(f"Failed to list BPMN diagrams: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@app.get("/bpmn-diagrams/{diagram_id}")
+async def get_bpmn_diagram(diagram_id: str):
+    """Get a specific BPMN diagram."""
+    try:
+        workflow_engine: WorkflowEngine = app.state.workflow_engine
+        diagram = await workflow_engine.get_workflow_definition(diagram_id)
+        
+        if not diagram:
+            raise HTTPException(status_code=404, detail="BPMN diagram not found")
+        
+        return {
+            "id": diagram.bpmn_id,
+            "name": diagram.name,
+            "version": diagram.version,
+            "process_id": diagram.process_id,
+            "bpmn_xml": diagram.bpmn_xml,
+            "task_count": len(diagram.task_definitions),
+            "is_executable": diagram.is_executable,
+            "tasks": [
+                {
+                    "id": task.task_id,
+                    "name": task.name,
+                    "type": task.task_type
+                }
+                for task in diagram.task_definitions
+            ]
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to get BPMN diagram: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
 

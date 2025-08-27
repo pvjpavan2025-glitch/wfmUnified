@@ -68,7 +68,7 @@ services:
   # WFM Backend Services
   api-gateway:
     build:
-      context: ./wfm/wfmServices
+      context: ./wfmServices
       dockerfile: Dockerfile
     container_name: wfm_api_gateway
     restart: unless-stopped
@@ -82,13 +82,13 @@ services:
       - ENVIRONMENT=production
       - ENV_FILE=env.online
     volumes:
-      - ./wfm/wfmServices/logs:/app/logs
+      - ./wfmServices/logs:/app/logs
     networks:
       - wfm-network
 
   auth-service:
     build:
-      context: ./wfm/wfmServices
+      context: ./wfmServices
       dockerfile: Dockerfile
     container_name: wfm_auth_service
     restart: unless-stopped
@@ -102,13 +102,13 @@ services:
       - ENVIRONMENT=production
       - ENV_FILE=env.online
     volumes:
-      - ./wfm/wfmServices/logs:/app/logs
+      - ./wfmServices/logs:/app/logs
     networks:
       - wfm-network
 
   config-service:
     build:
-      context: ./wfm/wfmServices
+      context: ./wfmServices
       dockerfile: Dockerfile
     container_name: wfm_config_service
     restart: unless-stopped
@@ -122,13 +122,13 @@ services:
       - ENVIRONMENT=production
       - ENV_FILE=env.online
     volumes:
-      - ./wfm/wfmServices/logs:/app/logs
+      - ./wfmServices/logs:/app/logs
     networks:
       - wfm-network
 
   rules-service:
     build:
-      context: ./wfm/wfmServices
+      context: ./wfmServices
       dockerfile: Dockerfile
     container_name: wfm_rules_service
     restart: unless-stopped
@@ -144,13 +144,13 @@ services:
       - ENVIRONMENT=production
       - ENV_FILE=env.online
     volumes:
-      - ./wfm/wfmServices/logs:/app/logs
+      - ./wfmServices/logs:/app/logs
     networks:
       - wfm-network
 
   order-service:
     build:
-      context: ./wfm/wfmServices
+      context: ./wfmServices
       dockerfile: Dockerfile
     container_name: wfm_order_service
     restart: unless-stopped
@@ -166,13 +166,13 @@ services:
       - ENVIRONMENT=production
       - ENV_FILE=env.online
     volumes:
-      - ./wfm/wfmServices/logs:/app/logs
+      - ./wfmServices/logs:/app/logs
     networks:
       - wfm-network
 
   scheduler-service:
     build:
-      context: ./wfm/wfmServices
+      context: ./wfmServices
       dockerfile: Dockerfile
     container_name: wfm_scheduler_service
     restart: unless-stopped
@@ -188,13 +188,13 @@ services:
       - ENVIRONMENT=production
       - ENV_FILE=env.online
     volumes:
-      - ./wfm/wfmServices/logs:/app/logs
+      - ./wfmServices/logs:/app/logs
     networks:
       - wfm-network
 
   issue-service:
     build:
-      context: ./wfm/wfmServices
+      context: ./wfmServices
       dockerfile: Dockerfile
     container_name: wfm_issue_service
     restart: unless-stopped
@@ -210,13 +210,13 @@ services:
       - ENVIRONMENT=production
       - ENV_FILE=env.online
     volumes:
-      - ./wfm/wfmServices/logs:/app/logs
+      - ./wfmServices/logs:/app/logs
     networks:
       - wfm-network
 
   analytics-service:
     build:
-      context: ./wfm/wfmServices
+      context: ./wfmServices
       dockerfile: Dockerfile
     container_name: wfm_analytics_service
     restart: unless-stopped
@@ -230,13 +230,13 @@ services:
       - ENVIRONMENT=production
       - ENV_FILE=env.online
     volumes:
-      - ./wfm/wfmServices/logs:/app/logs
+      - ./wfmServices/logs:/app/logs
     networks:
       - wfm-network
 
   dashboard-service:
     build:
-      context: ./wfm/wfmServices
+      context: ./wfmServices
       dockerfile: Dockerfile
     container_name: wfm_dashboard_service
     restart: unless-stopped
@@ -252,14 +252,62 @@ services:
       - ENVIRONMENT=production
       - ENV_FILE=env.online
     volumes:
-      - ./wfm/wfmServices/logs:/app/logs
+      - ./wfmServices/logs:/app/logs
     networks:
       - wfm-network
+
+  # New services for Order-Process-Task architecture
+  vendor-service:
+    build:
+      context: ./wfmServices
+      dockerfile: Dockerfile
+    container_name: wfm_vendor_service
+    restart: unless-stopped
+    ports:
+      - "8009:8009"
+    entrypoint: ["python"]
+    command: ["-m", "vendor_service.main"]
+    environment:
+      - MONGODB_URL=mongodb+srv://wfmadmin:tsarolabs%4012345%23@wfmdb.cvkb04l.mongodb.net/?retryWrites=true&w=majority&appName=wfmDB
+      - REDIS_URL=redis://default:kIdJfI3xoLxHiKFnCrkGBYffiDla8Y9h@redis-15514.c56.east-us.azure.redns.redis-cloud.com:15514
+      - DATABASE_NAME=wfm
+      - JWT_SECRET_KEY=wfmv4-super-secret-jwt-key-change-in-production
+      - ENVIRONMENT=production
+      - ENV_FILE=env.online
+    volumes:
+      - ./wfmServices/logs:/app/logs
+    networks:
+      - wfm-network
+
+  process-service:
+    build:
+      context: ./wfmServices
+      dockerfile: Dockerfile
+    container_name: wfm_process_service
+    restart: unless-stopped
+    ports:
+      - "8010:8010"
+    entrypoint: ["python"]
+    command: ["-m", "process_service.main"]
+    environment:
+      - MONGODB_URL=mongodb+srv://wfmadmin:tsarolabs%4012345%23@wfmdb.cvkb04l.mongodb.net/?retryWrites=true&w=majority&appName=wfmDB
+      - REDIS_URL=redis://default:kIdJfI3xoLxHiKFnCrkGBYffiDla8Y9h@redis-15514.c56.east-us.azure.redns.redis-cloud.com:15514
+      - DATABASE_NAME=wfm
+      - JWT_SECRET_KEY=wfmv4-super-secret-jwt-key-change-in-production
+      - ENVIRONMENT=production
+      - ENV_FILE=env.online
+      - BPMN_ENGINE_URL=http://wfmprocess-backend:8000
+    volumes:
+      - ./wfmServices/logs:/app/logs
+    networks:
+      - wfm-network
+    depends_on:
+      - wfmprocess-backend
 
   # Unified Frontend Application (wfmApp with integrated wfmProcess frontend)
   wfmapp:
     build:
-      context: ./wfm/wfmApp
+      context: ./wfmApp
       dockerfile: Dockerfile
     container_name: wfm_unified_frontend
     restart: unless-stopped

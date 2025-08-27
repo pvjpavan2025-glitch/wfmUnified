@@ -2,23 +2,49 @@
 
 [![Build Status](https://dev.azure.com/tsaro/WFM/_apis/build/status%2FwfmUnified?branchName=main)](https://dev.azure.com/tsaro/WFM/_build/latest?definitionId=4&branchName=main)
 
-This repository contains the integrated Workforce Management (WFM) system with BPMN workflow modeling capabilities.
+This repository contains the integrated Workforce Management (WFM) system with Order-Process-Task workflow architecture and BPMN modeling capabilities.
 
 ## Architecture Overview
 
-The system consists of:
+The system implements an **Order-Process-Task** hierarchical workflow architecture:
 
-1. **wfmApp** - Main UI application (Next.js) with integrated BPMN modeler
-2. **wfmServices** - Backend microservices for WFM operations
-3. **wfmProcess** - BPMN workflow engine backend
-4. **intServices** - Integration layer services
+### Core Components
+1. **wfmApp** - Next.js frontend with Order-Process-Task UI and integrated BPMN modeler
+2. **wfmServices** - API Gateway and core backend services
+3. **wfmProcess** - SpiffWorkflow BPMN engine for process execution
+4. **intServices** - Integration layer for external systems
+5. **vendor-service** - Vendor and technician management
+6. **process-service** - BPMN process management and execution
+
+### Workflow Hierarchy
+- **Orders**: Top-level work requests from external systems (OSM, CRM)
+- **Processes**: BPMN workflows that define how to fulfill orders
+- **Tasks**: Individual work items assigned to technicians with leads
+
+### Key Principles
+- Orders contain multiple Processes
+- Processes contain multiple Tasks
+- Only Tasks can be assigned/scheduled to technicians
+- Each task assignment requires both a Technician and Team Lead
+- BPMN diagrams represent Processes and are executed by SpiffWorkflow
 
 ## Key Features
 
-- **Unified Interface**: Single application with shared sidebar navigation
-- **BPMN Modeling**: Integrated workflow designer accessible via "Modelling" menu
-- **Microservices Architecture**: Scalable backend services
-- **Containerized Deployment**: Docker-based deployment with unified compose file
+### Frontend Features
+- **Order Management**: Complete order lifecycle with process and task visibility
+- **Task Management**: Advanced task assignment with technician + lead pairing
+- **Vendor Management**: Comprehensive vendor, technician, and team lead management
+- **BPMN Modeling**: Integrated workflow designer for process creation
+- **Dashboard**: Real-time metrics for orders, processes, tasks, and technician utilization
+- **Unified Interface**: Single application with consistent navigation
+
+### Backend Features
+- **Microservices Architecture**: Scalable, independent services
+- **BPMN Process Engine**: SpiffWorkflow integration for workflow execution
+- **Rules Engine**: Automatic process identification from order metadata
+- **Scheduling System**: Advanced task assignment with skill matching
+- **Analytics**: Performance tracking and utilization metrics
+- **API Gateway**: Centralized routing and authentication
 
 ## Quick Start
 
@@ -52,7 +78,6 @@ The system consists of:
 
 - **Frontend (wfmApp)**: http://localhost:3000
 - **API Gateway**: http://localhost:8000
-- **BPMN Backend**: http://localhost:8100
 - **Auth Service**: http://localhost:8001
 - **Config Service**: http://localhost:8002
 - **Rules Service**: http://localhost:8003
@@ -61,34 +86,62 @@ The system consists of:
 - **Analytics Service**: http://localhost:8006
 - **Dashboard Service**: http://localhost:8007
 - **Order Service**: http://localhost:8008
+- **Vendor Service**: http://localhost:8009
+- **Process Service**: http://localhost:8010
+- **BPMN Backend**: http://localhost:8100
 - **Traefik Dashboard**: http://localhost:8080
 - **PostgreSQL**: localhost:5432
 - **Redis**: localhost:6379
 
-## Integration Details
+## Order-Process-Task Workflow
 
-### Frontend Integration
+### Workflow Lifecycle
 
-The wfmProcess frontend has been integrated into wfmApp:
+1. **Order Creation**: External systems (OSM, CRM) create orders with metadata
+2. **Process Identification**: Rules service analyzes order metadata to identify required processes
+3. **Process Instantiation**: BPMN processes are created and executed via SpiffWorkflow
+4. **Task Generation**: Processes generate specific tasks that need completion
+5. **Task Assignment**: Tasks are assigned to technician + lead pairs based on skills and availability
+6. **Task Execution**: Technicians complete tasks with lead oversight
+7. **Process Completion**: All tasks complete, marking the process as finished
+8. **Order Fulfillment**: All processes complete, fulfilling the original order
 
-- **Modelling Menu**: Added to the main sidebar navigation
-- **BPMN Components**: Copied and adapted from wfmProcess/frontend
-- **Shared Layout**: Uses the same AppShell component for consistent UI
-- **Dependencies**: Added BPMN-related packages to wfmApp
+### Data Flow
 
-### Backend Integration
+```
+External System → Order → Rules Engine → Process Selection → BPMN Execution → Task Creation → Assignment → Completion
+```
 
-- **Unified Docker Compose**: Single file managing all services
-- **Network Configuration**: All services on the same Docker network
-- **Database Setup**: PostgreSQL for BPMN engine, MongoDB for WFM services
-- **Service Discovery**: Services can communicate via container names
+### Integration Points
+
+- **Frontend Integration**: Unified wfmApp with Order, Task, Vendor, and BPMN modeling pages
+- **Backend Integration**: Microservices communicate via API Gateway
+- **Process Integration**: SpiffWorkflow engine executes BPMN processes
+- **Database Integration**: MongoDB for WFM data, PostgreSQL for BPMN engine
+- **External Integration**: APIs for OSM, CRM, and other external systems
 
 ### Key Files
 
+#### Configuration
 - `/docker-compose.yml` - Unified deployment configuration
-- `/wfm/wfmApp/app/modelling/` - BPMN modeling pages
-- `/wfm/wfmApp/components/modelling/` - BPMN React components
-- `/wfm/wfmApp/components/app-shell.tsx` - Updated with Modelling menu
+- `/AZURE_DEPLOYMENT_GUIDE.md` - Azure deployment instructions
+- `/.env.example` - Environment variable template
+
+#### Frontend (wfmApp)
+- `/wfmApp/app/orders/page.tsx` - Order management interface
+- `/wfmApp/app/tasks/page.tsx` - Task management interface  
+- `/wfmApp/app/vendors/page.tsx` - Vendor management interface
+- `/wfmApp/app/modelling/page.tsx` - BPMN modeling interface
+- `/wfmApp/components/task-management.tsx` - Task assignment and tracking
+- `/wfmApp/components/dashboard-content.tsx` - Order-Process-Task metrics
+- `/wfmApp/components/app-shell.tsx` - Navigation with new menu items
+
+#### Backend Services
+- `/wfmServices/` - Core WFM microservices
+- `/wfmServices/vendor_service/` - Vendor and technician management
+- `/wfmServices/process_service/` - Process management and BPMN integration
+- `/wfmProcess/backend/` - SpiffWorkflow BPMN engine
+- `/intServices/` - External system integrations
 
 ## Development Workflow
 

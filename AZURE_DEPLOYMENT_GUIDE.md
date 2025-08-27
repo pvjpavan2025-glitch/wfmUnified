@@ -68,10 +68,12 @@ POSTGRES_PASSWORD: [Strong password for PostgreSQL admin]
 ## 🏗️ Architecture Overview
 
 ### Services Deployed
-1. **wfm-app**: Next.js frontend application
+1. **wfm-app**: Next.js frontend application with Order-Process-Task UI
 2. **wfm-services**: Main backend API gateway
-3. **wfm-int-services**: Integration services
-4. **wfm-process**: BPMN workflow engine
+3. **wfm-int-services**: Integration services for external systems
+4. **wfm-process**: BPMN workflow engine (SpiffWorkflow)
+5. **vendor-service**: Vendor and technician management (Port 8009)
+6. **process-service**: BPMN process management and execution (Port 8010)
 
 ### Azure Resources Created
 - **Resource Group**: `wfm-unified-rg`
@@ -105,32 +107,67 @@ POST /api/v1/auth/login
 POST /api/v1/auth/logout
 GET  /api/v1/auth/verify
 
-# Dashboard
+# Dashboard (Updated for Order-Process-Task)
 GET  /api/v1/dashboard/metrics
-GET  /api/v1/dashboard/recent-jobs
+GET  /api/v1/dashboard/recent-orders
 
-# Jobs Management
-GET    /api/v1/jobs
-POST   /api/v1/jobs
-GET    /api/v1/jobs/{id}
-PUT    /api/v1/jobs/{id}
-DELETE /api/v1/jobs/{id}
+# Order Management (New Architecture)
+GET    /api/v1/orders
+POST   /api/v1/orders
+GET    /api/v1/orders/{id}
+PUT    /api/v1/orders/{id}
+DELETE /api/v1/orders/{id}
+GET    /api/v1/orders/{id}/processes
+GET    /api/v1/orders/{id}/tasks
 
-# Technicians
+# Process Management
+GET    /api/v1/processes
+POST   /api/v1/processes
+GET    /api/v1/processes/{id}
+PUT    /api/v1/processes/{id}
+DELETE /api/v1/processes/{id}
+POST   /api/v1/processes/{id}/execute
+GET    /api/v1/processes/{id}/tasks
+
+# Task Management
+GET    /api/v1/tasks
+POST   /api/v1/tasks
+GET    /api/v1/tasks/{id}
+PUT    /api/v1/tasks/{id}
+POST   /api/v1/tasks/{id}/assign
+POST   /api/v1/tasks/{id}/complete
+
+# Vendor Management (New)
+GET    /api/v1/vendors
+POST   /api/v1/vendors
+GET    /api/v1/vendors/{id}
+PUT    /api/v1/vendors/{id}
+GET    /api/v1/vendors/{id}/technicians
+GET    /api/v1/vendors/{id}/leads
+
+# Technician Management (Updated)
 GET    /api/v1/technicians
 POST   /api/v1/technicians
 GET    /api/v1/technicians/{id}
 PUT    /api/v1/technicians/{id}
+GET    /api/v1/technicians/available
 
-# Scheduling
-GET  /api/v1/schedule
-POST /api/v1/schedule/assign
-PUT  /api/v1/schedule/{id}
+# Team Lead Management (New)
+GET    /api/v1/leads
+POST   /api/v1/leads
+GET    /api/v1/leads/{id}
+PUT    /api/v1/leads/{id}
 
-# Analytics
-GET /api/v1/analytics/performance
-GET /api/v1/analytics/utilization
-GET /api/v1/analytics/trends
+# Scheduling (Updated for Task Assignment)
+GET  /api/v1/schedule/tasks
+POST /api/v1/schedule/assign-task
+PUT  /api/v1/schedule/tasks/{id}
+
+# Analytics (Updated Metrics)
+GET /api/v1/analytics/order-performance
+GET /api/v1/analytics/process-utilization
+GET /api/v1/analytics/task-completion
+GET /api/v1/analytics/technician-utilization
 ```
 
 ### WFM Process API (`/process/v1`)
@@ -176,17 +213,32 @@ Response:
 }
 ```
 
-### Create Job
+### Create Order (New Architecture)
 ```json
-POST /api/v1/jobs
+POST /api/v1/orders
 {
-  "job_number": "JOB-2024-001",
-  "description": "HVAC Maintenance",
-  "location": "Building A, Floor 3",
+  "external_id": "ORD-2024-001",
+  "source": "OSM",
+  "description": "Service installation order",
+  "customer_id": "CUST-001",
   "priority": "high",
-  "estimated_hours": 4,
-  "due_date": "2024-01-15T10:00:00Z",
-  "technician_id": "tech-001"
+  "requested_completion_date": "2024-01-20T18:00:00Z",
+  "metadata": {
+    "service_type": "installation",
+    "equipment_type": "fiber_optic"
+  }
+}
+```
+
+### Assign Task to Technician and Lead
+```json
+POST /api/v1/tasks/{task_id}/assign
+{
+  "technician_id": "tech-001",
+  "lead_id": "lead-001",
+  "scheduled_start": "2024-01-15T10:00:00Z",
+  "scheduled_end": "2024-01-15T14:00:00Z",
+  "notes": "Requires fiber optic installation expertise"
 }
 ```
 

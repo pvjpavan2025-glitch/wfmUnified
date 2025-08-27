@@ -3,7 +3,6 @@ import { API_CONFIG } from './api';
 export interface LoginCredentials {
   username: string;
   password: string;
-  tenant_id: string;
 }
 
 export interface User {
@@ -13,9 +12,6 @@ export interface User {
   first_name: string;
   last_name: string;
   roles: string[];
-  tenant_id: string;
-  status: string;
-  permissions: string[];
 }
 
 export interface AuthResponse {

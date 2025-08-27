@@ -199,7 +199,7 @@ export default function DashboardContent() {
     <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-semibold text-gray-900">Dashboard</h1>
-        <p className="text-sm text-gray-600">Overview of your field service operations</p>
+        <p className="text-sm text-gray-600">Overview of your workforce maangement operations</p>
       </div>
 
       {/* Key Metrics */}

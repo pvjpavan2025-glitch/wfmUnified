@@ -136,7 +136,7 @@ export default function Component() {
         <header className="bg-white border-b border-gray-200 px-6 py-4">
           <div className="flex items-center justify-between">
             <div>
-              <h1 className="text-2xl font-bold text-gray-900">Field Service Management</h1>
+              <h1 className="text-2xl font-bold text-gray-900">Workforce Management</h1>
               <p className="text-sm text-gray-500">Admin Dashboard</p>
             </div>
             <div className="flex items-center gap-4">
@@ -150,7 +150,7 @@ export default function Component() {
         <main className="p-6">
           <div className="mb-8">
             <h2 className="text-xl font-semibold text-gray-900 mb-2">Dashboard</h2>
-            <p className="text-gray-600">Overview of your field service operations</p>
+            <p className="text-gray-600">Overview of Workforce Management operations</p>
           </div>
 
           {/* Metrics Grid */}

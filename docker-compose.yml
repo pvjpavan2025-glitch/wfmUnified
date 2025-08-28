@@ -366,6 +366,8 @@ services:
     environment:
       - DATABASE_URL=postgresql+asyncpg://workflow_user:workflow_pass@wfm-postgres:5432/workflow
       - REDIS_URL=redis://wfm-redis:6379
+      - MONGODB_URL=mongodb://wfmadmin:tsarolabs%4012345%23@wfm-mongodb:27017/wfm?authSource=admin
+      - MONGODB_DATABASE=wfm
       - SECRET_KEY=your-super-secret-key-change-in-production
       - DEBUG=true
       - LOG_LEVEL=INFO
@@ -378,6 +380,8 @@ services:
       postgres:
         condition: service_healthy
       redis:
+        condition: service_healthy
+      mongodb:
         condition: service_healthy
       api-gateway:
         condition: service_started

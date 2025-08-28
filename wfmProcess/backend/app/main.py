@@ -11,10 +11,12 @@ import uvicorn
 from .core.config import settings
 from .core.database import init_db, close_db
 from .core.redis_client import redis_client
+from .core.mongodb import init_mongodb, close_mongodb
 from .engine.workflow_engine import WorkflowEngine, WorkflowExecutionError
 from .api.workflows import router as workflows_router
 from .api.tasks import router as tasks_router
 from .api.executions import router as executions_router
+from .api.process_management import router as process_management_router
 
 
 # Configure logging
@@ -35,6 +37,10 @@ async def lifespan(app: FastAPI):
         # Initialize database
         await init_db()
         logger.info("Database initialized successfully")
+        
+        # Initialize MongoDB
+        await init_mongodb()
+        logger.info("MongoDB initialized successfully")
         
         # Initialize Redis
         await redis_client.connect()
@@ -63,6 +69,10 @@ async def lifespan(app: FastAPI):
             # Close database connections
             await close_db()
             logger.info("Database connections closed successfully")
+            
+            # Close MongoDB connection
+            await close_mongodb()
+            logger.info("MongoDB disconnected successfully")
             
         except Exception as e:
             logger.error(f"Error during shutdown: {e}")
@@ -93,6 +103,7 @@ app.add_middleware(
 app.include_router(workflows_router, prefix=f"{settings.api_prefix}/workflows", tags=["workflows"])
 app.include_router(tasks_router, prefix=f"{settings.api_prefix}/tasks", tags=["tasks"])
 app.include_router(executions_router, prefix=f"{settings.api_prefix}/executions", tags=["executions"])
+app.include_router(process_management_router, prefix=f"{settings.api_prefix}/processes", tags=["processes"])
 
 
 @app.get("/")
@@ -113,12 +124,17 @@ async def health_check():
         # Check Redis connection
         redis_healthy = await redis_client.ping()
         
+        # Check MongoDB connection
+        from .core.mongodb import mongodb_health_check
+        mongodb_healthy = await mongodb_health_check()
+        
         return {
-            "status": "healthy" if redis_healthy else "unhealthy",
+            "status": "healthy" if redis_healthy and mongodb_healthy else "unhealthy",
             "timestamp": "2024-01-01T00:00:00Z",  # Replace with actual timestamp
             "services": {
                 "redis": "connected" if redis_healthy else "disconnected",
                 "database": "connected",  # Add actual database health check
+                "mongodb": "connected" if mongodb_healthy else "disconnected",
                 "workflow_engine": "running"
             }
         }

@@ -31,6 +31,10 @@ class Settings(BaseSettings):
     redis_url: str = Field(default="redis://localhost:6379", env="REDIS_URL")
     redis_db: int = Field(default=0, env="REDIS_DB")
     
+    # MongoDB
+    mongodb_url: str = Field(default="mongodb://localhost:27017", env="MONGODB_URL")
+    mongodb_database: str = Field(default="wfm", env="MONGODB_DATABASE")
+    
     # Workflow Engine
     max_workflow_instances: int = Field(default=1000, env="MAX_WORKFLOW_INSTANCES")
     workflow_timeout_seconds: int = Field(default=3600, env="WORKFLOW_TIMEOUT_SECONDS")

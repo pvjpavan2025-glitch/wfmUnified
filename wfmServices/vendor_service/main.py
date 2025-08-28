@@ -1,10 +1,12 @@
 """
 Vendor Service FastAPI application.
 """
+from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, Depends, Query
 from typing import List, Optional
-from shared.auth import get_current_user, get_tenant_id
+from shared.auth import get_current_user
 from shared.models import PaginationParams, SuccessResponse, ErrorResponse
+from shared.database import db_manager
 from .models import (
     VendorCreate, VendorUpdate, VendorResponse,
     TechnicianCreate, TechnicianUpdate, TechnicianResponse,
@@ -12,14 +14,34 @@ from .models import (
     TaskAssignment
 )
 from .service import VendorService
+from .repository import VendorRepository, TechnicianRepository, LeadRepository
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Application lifespan manager."""
+    # Startup
+    await db_manager.connect_mongodb()
+    yield
+    # Shutdown
+    await db_manager.close()
+
 
 app = FastAPI(
     title="Vendor Service",
     description="Manages vendors, technicians, and leads",
-    version="1.0.0"
+    version="1.0.0",
+    lifespan=lifespan
 )
 
-vendor_service = VendorService()
+
+async def get_vendor_service() -> VendorService:
+    """Dependency injection for VendorService."""
+    database = await db_manager.get_database()
+    vendor_repo = VendorRepository(database)
+    technician_repo = TechnicianRepository(database)
+    lead_repo = LeadRepository(database)
+    return VendorService(vendor_repo, technician_repo, lead_repo)
 
 
 @app.get("/health")
@@ -32,22 +54,21 @@ async def health_check():
 @app.post("/vendors", response_model=VendorResponse)
 async def create_vendor(
     vendor_data: VendorCreate,
-    tenant_id: str = Depends(get_tenant_id),
-    current_user: dict = Depends(get_current_user)
+    current_user: dict = Depends(get_current_user),
+    service: VendorService = Depends(get_vendor_service)
 ):
     """Create a new vendor."""
-    vendor_data.tenant_id = tenant_id
-    return await vendor_service.create_vendor(vendor_data)
+    return await service.create_vendor(vendor_data)
 
 
 @app.get("/vendors/{vendor_id}", response_model=VendorResponse)
 async def get_vendor(
     vendor_id: str,
-    tenant_id: str = Depends(get_tenant_id),
-    current_user: dict = Depends(get_current_user)
+    current_user: dict = Depends(get_current_user),
+    service: VendorService = Depends(get_vendor_service)
 ):
     """Get vendor by ID."""
-    vendor = await vendor_service.get_vendor(vendor_id, tenant_id)
+    vendor = await service.get_vendor(vendor_id)
     if not vendor:
         raise HTTPException(status_code=404, detail="Vendor not found")
     return vendor
@@ -57,23 +78,23 @@ async def get_vendor(
 async def get_vendors(
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=1000),
-    tenant_id: str = Depends(get_tenant_id),
-    current_user: dict = Depends(get_current_user)
+    current_user: dict = Depends(get_current_user),
+    service: VendorService = Depends(get_vendor_service)
 ):
     """Get all vendors."""
     pagination = PaginationParams(skip=skip, limit=limit)
-    return await vendor_service.get_vendors(tenant_id, pagination)
+    return await service.get_vendors(skip, limit)
 
 
 @app.put("/vendors/{vendor_id}", response_model=VendorResponse)
 async def update_vendor(
     vendor_id: str,
     update_data: VendorUpdate,
-    tenant_id: str = Depends(get_tenant_id),
-    current_user: dict = Depends(get_current_user)
+    current_user: dict = Depends(get_current_user),
+    service: VendorService = Depends(get_vendor_service)
 ):
     """Update vendor."""
-    vendor = await vendor_service.update_vendor(vendor_id, tenant_id, update_data)
+    vendor = await service.update_vendor(vendor_id, update_data)
     if not vendor:
         raise HTTPException(status_code=404, detail="Vendor not found")
     return vendor
@@ -82,11 +103,11 @@ async def update_vendor(
 @app.delete("/vendors/{vendor_id}", response_model=SuccessResponse)
 async def delete_vendor(
     vendor_id: str,
-    tenant_id: str = Depends(get_tenant_id),
-    current_user: dict = Depends(get_current_user)
+    current_user: dict = Depends(get_current_user),
+    service: VendorService = Depends(get_vendor_service)
 ):
     """Delete vendor."""
-    success = await vendor_service.delete_vendor(vendor_id, tenant_id)
+    success = await service.delete_vendor(vendor_id)
     if not success:
         raise HTTPException(status_code=404, detail="Vendor not found")
     return SuccessResponse(message="Vendor deleted successfully")
@@ -96,22 +117,21 @@ async def delete_vendor(
 @app.post("/technicians", response_model=TechnicianResponse)
 async def create_technician(
     technician_data: TechnicianCreate,
-    tenant_id: str = Depends(get_tenant_id),
-    current_user: dict = Depends(get_current_user)
+    current_user: dict = Depends(get_current_user),
+    service: VendorService = Depends(get_vendor_service)
 ):
     """Create a new technician."""
-    technician_data.tenant_id = tenant_id
-    return await vendor_service.create_technician(technician_data)
+    return await service.create_technician(technician_data)
 
 
 @app.get("/technicians/{technician_id}", response_model=TechnicianResponse)
 async def get_technician(
     technician_id: str,
-    tenant_id: str = Depends(get_tenant_id),
-    current_user: dict = Depends(get_current_user)
+    current_user: dict = Depends(get_current_user),
+    service: VendorService = Depends(get_vendor_service)
 ):
     """Get technician by ID."""
-    technician = await vendor_service.get_technician(technician_id, tenant_id)
+    technician = await service.get_technician(technician_id)
     if not technician:
         raise HTTPException(status_code=404, detail="Technician not found")
     return technician
@@ -120,32 +140,32 @@ async def get_technician(
 @app.get("/vendors/{vendor_id}/technicians", response_model=List[TechnicianResponse])
 async def get_technicians_by_vendor(
     vendor_id: str,
-    tenant_id: str = Depends(get_tenant_id),
-    current_user: dict = Depends(get_current_user)
+    current_user: dict = Depends(get_current_user),
+    service: VendorService = Depends(get_vendor_service)
 ):
     """Get all technicians for a vendor."""
-    return await vendor_service.get_technicians_by_vendor(vendor_id, tenant_id)
+    return await service.get_technicians_by_vendor(vendor_id)
 
 
 @app.get("/technicians/available", response_model=List[TechnicianResponse])
 async def get_available_technicians(
     skills: List[str] = Query(..., description="Required skills"),
-    tenant_id: str = Depends(get_tenant_id),
-    current_user: dict = Depends(get_current_user)
+    current_user: dict = Depends(get_current_user),
+    service: VendorService = Depends(get_vendor_service)
 ):
     """Get available technicians with required skills."""
-    return await vendor_service.get_available_technicians(skills, tenant_id)
+    return await service.get_available_technicians(skills)
 
 
 @app.put("/technicians/{technician_id}", response_model=TechnicianResponse)
 async def update_technician(
     technician_id: str,
     update_data: TechnicianUpdate,
-    tenant_id: str = Depends(get_tenant_id),
-    current_user: dict = Depends(get_current_user)
+    current_user: dict = Depends(get_current_user),
+    service: VendorService = Depends(get_vendor_service)
 ):
     """Update technician."""
-    technician = await vendor_service.update_technician(technician_id, tenant_id, update_data)
+    technician = await service.update_technician(technician_id, update_data)
     if not technician:
         raise HTTPException(status_code=404, detail="Technician not found")
     return technician
@@ -154,11 +174,11 @@ async def update_technician(
 @app.delete("/technicians/{technician_id}", response_model=SuccessResponse)
 async def delete_technician(
     technician_id: str,
-    tenant_id: str = Depends(get_tenant_id),
-    current_user: dict = Depends(get_current_user)
+    current_user: dict = Depends(get_current_user),
+    service: VendorService = Depends(get_vendor_service)
 ):
     """Delete technician."""
-    success = await vendor_service.delete_technician(technician_id, tenant_id)
+    success = await service.delete_technician(technician_id)
     if not success:
         raise HTTPException(status_code=404, detail="Technician not found")
     return SuccessResponse(message="Technician deleted successfully")
@@ -168,22 +188,21 @@ async def delete_technician(
 @app.post("/leads", response_model=LeadResponse)
 async def create_lead(
     lead_data: LeadCreate,
-    tenant_id: str = Depends(get_tenant_id),
-    current_user: dict = Depends(get_current_user)
+    current_user: dict = Depends(get_current_user),
+    service: VendorService = Depends(get_vendor_service)
 ):
     """Create a new lead."""
-    lead_data.tenant_id = tenant_id
-    return await vendor_service.create_lead(lead_data)
+    return await service.create_lead(lead_data)
 
 
 @app.get("/leads/{lead_id}", response_model=LeadResponse)
 async def get_lead(
     lead_id: str,
-    tenant_id: str = Depends(get_tenant_id),
-    current_user: dict = Depends(get_current_user)
+    current_user: dict = Depends(get_current_user),
+    service: VendorService = Depends(get_vendor_service)
 ):
     """Get lead by ID."""
-    lead = await vendor_service.get_lead(lead_id, tenant_id)
+    lead = await service.get_lead(lead_id)
     if not lead:
         raise HTTPException(status_code=404, detail="Lead not found")
     return lead
@@ -192,21 +211,21 @@ async def get_lead(
 @app.get("/vendors/{vendor_id}/leads", response_model=List[LeadResponse])
 async def get_leads_by_vendor(
     vendor_id: str,
-    tenant_id: str = Depends(get_tenant_id),
-    current_user: dict = Depends(get_current_user)
+    current_user: dict = Depends(get_current_user),
+    service: VendorService = Depends(get_vendor_service)
 ):
     """Get all leads for a vendor."""
-    return await vendor_service.get_leads_by_vendor(vendor_id, tenant_id)
+    return await service.get_leads_by_vendor(vendor_id)
 
 
 @app.get("/technicians/{technician_id}/lead", response_model=LeadResponse)
 async def get_lead_for_technician(
     technician_id: str,
-    tenant_id: str = Depends(get_tenant_id),
-    current_user: dict = Depends(get_current_user)
+    current_user: dict = Depends(get_current_user),
+    service: VendorService = Depends(get_vendor_service)
 ):
     """Get the lead managing a specific technician."""
-    lead = await vendor_service.get_lead_for_technician(technician_id, tenant_id)
+    lead = await service.get_lead_for_technician(technician_id)
     if not lead:
         raise HTTPException(status_code=404, detail="Lead not found for technician")
     return lead
@@ -216,11 +235,11 @@ async def get_lead_for_technician(
 async def update_lead(
     lead_id: str,
     update_data: LeadUpdate,
-    tenant_id: str = Depends(get_tenant_id),
-    current_user: dict = Depends(get_current_user)
+    current_user: dict = Depends(get_current_user),
+    service: VendorService = Depends(get_vendor_service)
 ):
     """Update lead."""
-    lead = await vendor_service.update_lead(lead_id, tenant_id, update_data)
+    lead = await service.update_lead(lead_id, update_data)
     if not lead:
         raise HTTPException(status_code=404, detail="Lead not found")
     return lead
@@ -229,11 +248,11 @@ async def update_lead(
 @app.delete("/leads/{lead_id}", response_model=SuccessResponse)
 async def delete_lead(
     lead_id: str,
-    tenant_id: str = Depends(get_tenant_id),
-    current_user: dict = Depends(get_current_user)
+    current_user: dict = Depends(get_current_user),
+    service: VendorService = Depends(get_vendor_service)
 ):
     """Delete lead."""
-    success = await vendor_service.delete_lead(lead_id, tenant_id)
+    success = await service.delete_lead(lead_id)
     if not success:
         raise HTTPException(status_code=404, detail="Lead not found")
     return SuccessResponse(message="Lead deleted successfully")
@@ -244,11 +263,11 @@ async def delete_lead(
 async def assign_task(
     task_id: str,
     technician_id: str,
-    tenant_id: str = Depends(get_tenant_id),
-    current_user: dict = Depends(get_current_user)
+    current_user: dict = Depends(get_current_user),
+    service: VendorService = Depends(get_vendor_service)
 ):
     """Assign a task to a technician and their lead."""
-    assignment = await vendor_service.assign_task(task_id, technician_id, tenant_id)
+    assignment = await service.assign_task(task_id, technician_id)
     if not assignment:
         raise HTTPException(
             status_code=400, 
@@ -261,11 +280,11 @@ async def assign_task(
 async def unassign_task(
     task_id: str,
     technician_id: str,
-    tenant_id: str = Depends(get_tenant_id),
-    current_user: dict = Depends(get_current_user)
+    current_user: dict = Depends(get_current_user),
+    service: VendorService = Depends(get_vendor_service)
 ):
     """Unassign a task from a technician."""
-    success = await vendor_service.unassign_task(task_id, technician_id, tenant_id)
+    success = await service.unassign_task(task_id, technician_id)
     if not success:
         raise HTTPException(status_code=404, detail="Task assignment not found")
     return SuccessResponse(message="Task unassigned successfully")

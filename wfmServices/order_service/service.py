@@ -10,8 +10,8 @@ from .repository import OrderRepository
 class OrderService:
     """Service for order management."""
     
-    def __init__(self):
-        self.repository = OrderRepository()
+    def __init__(self, repository: OrderRepository):
+        self.repository = repository
         self.rules_service_url = "http://localhost:8003"  # rules service
         self.process_service_url = "http://localhost:8008"  # process service
 

@@ -16,10 +16,10 @@ from .repository import VendorRepository, TechnicianRepository, LeadRepository
 class VendorService:
     """Service for vendor management."""
     
-    def __init__(self):
-        self.vendor_repo = VendorRepository()
-        self.technician_repo = TechnicianRepository()
-        self.lead_repo = LeadRepository()
+    def __init__(self, vendor_repo: VendorRepository, technician_repo: TechnicianRepository, lead_repo: LeadRepository):
+        self.vendor_repo = vendor_repo
+        self.technician_repo = technician_repo
+        self.lead_repo = lead_repo
     
     async def create_vendor(self, vendor_data: VendorCreate) -> VendorResponse:
         """Create a new vendor."""

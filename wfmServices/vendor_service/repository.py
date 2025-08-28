@@ -3,7 +3,7 @@ Repository layer for Vendor Service.
 """
 from typing import List, Optional
 from datetime import datetime
-from shared.database import get_database
+import motor.motor_asyncio
 from shared.models import PaginationParams
 from .models import Vendor, Technician, Lead
 
@@ -11,8 +11,8 @@ from .models import Vendor, Technician, Lead
 class VendorRepository:
     """Repository for vendor operations."""
     
-    def __init__(self):
-        self.db = get_database()
+    def __init__(self, database: motor.motor_asyncio.AsyncIOMotorDatabase):
+        self.db = database
         self.collection = self.db.vendors
     
     async def create(self, vendor: Vendor) -> Vendor:
@@ -62,8 +62,8 @@ class VendorRepository:
 class TechnicianRepository:
     """Repository for technician operations."""
     
-    def __init__(self):
-        self.db = get_database()
+    def __init__(self, database: motor.motor_asyncio.AsyncIOMotorDatabase):
+        self.db = database
         self.collection = self.db.technicians
     
     async def create(self, technician: Technician) -> Technician:
@@ -127,8 +127,8 @@ class TechnicianRepository:
 class LeadRepository:
     """Repository for lead operations."""
     
-    def __init__(self):
-        self.db = get_database()
+    def __init__(self, database: motor.motor_asyncio.AsyncIOMotorDatabase):
+        self.db = database
         self.collection = self.db.leads
     
     async def create(self, lead: Lead) -> Lead:

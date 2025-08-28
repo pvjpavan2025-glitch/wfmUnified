@@ -163,6 +163,18 @@ docker-compose up -d
 - Build wfmApp separately later:
   - docker-compose build wfmapp && docker-compose up -d wfmapp
 
+### REmove only few images and rebuild
+- docker-compose stop wfmapp api-gateway order-service vendor-service
+- docker image rm wfmunified-wfmapp:latest wfmunified-api-gateway:latest wfmunified-order-service:latest wfmunified-vendor-service:latest
+- docker images | grep wfmunified
+- docker image rm wfmunified-wfmapp wfmunified-api-gateway wfmunified-order-service wfmunified-vendor-service
+  - docker rmi -f b9b6f468e2dd d1835e664b17 1366468a6003 ead0c7611f44
+- docker-compose build --no-cache wfmapp api-gateway order-service vendor-service
+- docker-compose up -d order-service vendor-service
+- docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
+- docker logs wfm_order_service --tail 10
+
+
 ## Notes
 
 - The rebuild process removes ALL containers and images, ensuring a completely fresh start

@@ -86,13 +86,13 @@ def _env(name: str, default: str) -> str:
 SERVICE_URLS = {
     # Defaults intentionally empty in Azure (no in-container DNS like docker-compose)
     "auth": _env("AUTH_SERVICE_URL", "http://localhost:8001"),
-    "order": _env("ORDER_SERVICE_URL", "http://localhost:8002"),
-    "config": _env("CONFIG_SERVICE_URL", "http://localhost:8008"),
+    "config": _env("CONFIG_SERVICE_URL", "http://localhost:8002"),
     "rules": _env("RULES_SERVICE_URL", "http://localhost:8003"),
     "scheduler": _env("SCHEDULER_SERVICE_URL", "http://localhost:8004"),
     "issue": _env("ISSUE_SERVICE_URL", "http://localhost:8005"),
     "analytics": _env("ANALYTICS_SERVICE_URL", "http://localhost:8006"),
-    "vendor": _env("VENDOR_SERVICE_URL", "http://localhost:8007"),
+    "order": _env("ORDER_SERVICE_URL", "http://localhost:8008"),
+    "vendor": _env("VENDOR_SERVICE_URL", "http://localhost:8009"),
     "dashboard": _env("DASHBOARD_SERVICE_URL", ""),
 }
 

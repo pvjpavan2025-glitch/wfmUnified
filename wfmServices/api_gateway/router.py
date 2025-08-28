@@ -15,13 +15,13 @@ class APIRouter:
     def __init__(self):
         self.service_urls = {
             "auth": "http://localhost:8001",
-            "order": "http://localhost:8002",
+            "config": "http://localhost:8002",
             "rules": "http://localhost:8003",
             "scheduler": "http://localhost:8004",
             "issue": "http://localhost:8005",
             "analytics": "http://localhost:8006",
-            "vendor": "http://localhost:8007",
-            "config": "http://localhost:8008"
+            "order": "http://localhost:8008",
+            "vendor": "http://localhost:8009"
         }
     
     async def route_request(self, request: Request, service: str, path: str) -> JSONResponse:

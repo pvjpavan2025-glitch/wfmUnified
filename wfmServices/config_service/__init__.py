@@ -1,3 +1,0 @@
-"""
-Configuration Service for WFM.
-""" 

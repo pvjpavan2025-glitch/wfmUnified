@@ -1,0 +1,191 @@
+# Azure DevOps pipeline for building, pushing, and deploying the wfmServices microservices
+# Triggers on changes to the main branch under wfmServices/
+trigger:
+  branches:
+    include:
+      - main
+  paths:
+    include:
+      - wfmServices/**
+
+pr:
+  branches:
+    include:
+      - main
+  paths:
+    include:
+      - wfmServices/**
+
+pool:
+  vmImage: ubuntu-latest
+
+variables:
+  # Required variables:
+  # - azureSubscription: Azure RM service connection
+  # - acrServiceConnection: Docker Registry service connection to ACR
+  # - acrLoginServer: e.g. myregistry.azurecr.io
+  # - webAppNameBackend: Azure Web App for Containers name hosting the backend (multi-container)
+  # - mongoUri: MongoDB connection string (Atlas)
+  # - redisUrl: Redis connection string (Redis Cloud)
+  # Optional:
+  # - imageTag: Override default tag
+  imageTag: $(Build.BuildId)
+
+# Build and push images for each service; also build and push wfmApp image so compose can reference a consistent tag
+stages:
+  - stage: BuildAndPush
+    displayName: Build and push all images
+    jobs:
+      - job: BuildPush
+        displayName: Build and push images to ACR
+        steps:
+          - checkout: self
+            fetchDepth: 1
+
+          - task: Docker@2
+            displayName: Login to ACR
+            inputs:
+              containerRegistry: $(acrServiceConnection)
+              command: login
+
+          # Build and push backend service images using build-args to set SERVICE_NAME where needed
+          - task: Docker@2
+            displayName: Build and push api_gateway
+            inputs:
+              command: buildAndPush
+              containerRegistry: $(acrServiceConnection)
+              repository: api-gateway
+              Dockerfile: wfmServices/Dockerfile
+              buildContext: wfmServices
+              arguments: --build-arg SERVICE_NAME=api_gateway
+              tags: |
+                $(imageTag)
+
+          - task: Docker@2
+            displayName: Build and push auth_service
+            inputs:
+              command: buildAndPush
+              containerRegistry: $(acrServiceConnection)
+              repository: auth-service
+              Dockerfile: wfmServices/Dockerfile
+              buildContext: wfmServices
+              arguments: --build-arg SERVICE_NAME=auth_service
+              tags: |
+                $(imageTag)
+
+          - task: Docker@2
+            displayName: Build and push config_service
+            inputs:
+              command: buildAndPush
+              containerRegistry: $(acrServiceConnection)
+              repository: config-service
+              Dockerfile: wfmServices/Dockerfile
+              buildContext: wfmServices
+              arguments: --build-arg SERVICE_NAME=config_service
+              tags: |
+                $(imageTag)
+
+          - task: Docker@2
+            displayName: Build and push rules_service
+            inputs:
+              command: buildAndPush
+              containerRegistry: $(acrServiceConnection)
+              repository: rules-service
+              Dockerfile: wfmServices/Dockerfile
+              buildContext: wfmServices
+              arguments: --build-arg SERVICE_NAME=rules_service
+              tags: |
+                $(imageTag)
+
+          - task: Docker@2
+            displayName: Build and push scheduler_service
+            inputs:
+              command: buildAndPush
+              containerRegistry: $(acrServiceConnection)
+              repository: scheduler-service
+              Dockerfile: wfmServices/Dockerfile
+              buildContext: wfmServices
+              arguments: --build-arg SERVICE_NAME=scheduler_service
+              tags: |
+                $(imageTag)
+
+          - task: Docker@2
+            displayName: Build and push issue_service
+            inputs:
+              command: buildAndPush
+              containerRegistry: $(acrServiceConnection)
+              repository: issue-service
+              Dockerfile: wfmServices/Dockerfile
+              buildContext: wfmServices
+              arguments: --build-arg SERVICE_NAME=issue_service
+              tags: |
+                $(imageTag)
+
+          - task: Docker@2
+            displayName: Build and push analytics_service
+            inputs:
+              command: buildAndPush
+              containerRegistry: $(acrServiceConnection)
+              repository: analytics-service
+              Dockerfile: wfmServices/Dockerfile
+              buildContext: wfmServices
+              arguments: --build-arg SERVICE_NAME=analytics_service
+              tags: |
+                $(imageTag)
+
+          - task: Docker@2
+            displayName: Build and push dashboard_service
+            inputs:
+              command: buildAndPush
+              containerRegistry: $(acrServiceConnection)
+              repository: dashboard-service
+              Dockerfile: wfmServices/Dockerfile
+              buildContext: wfmServices
+              arguments: --build-arg SERVICE_NAME=dashboard_service
+              tags: |
+                $(imageTag)
+
+          # Note: Frontend (wfmApp) image is built and deployed by the wfmApp pipeline
+
+  - stage: Deploy
+    displayName: Deploy to Azure Web App (Containers)
+    dependsOn: BuildAndPush
+    jobs:
+      - job: DeployBackend
+        displayName: Deploy backend multi-container to Web App
+        steps:
+          - checkout: self
+            fetchDepth: 1
+
+          - task: Bash@3
+            name: RenderCompose
+            displayName: Render docker-compose.azure.yml
+            inputs:
+              targetType: inline
+              script: |
+                set -euo pipefail
+                sed -e "s#__ACR_LOGIN_SERVER__#$(acrLoginServer)#g" \
+                    -e "s#__TAG__#$(imageTag)#g" \
+                    -e "s#__MONGO_URI__#$(mongoUri)#g" \
+                    -e "s#__REDIS_URL__#$(redisUrl)#g" \
+                    -e "s#__JWT_SECRET__#$(jwtSecret)#g" \
+                    wfmServices/docker-compose.azure.yml > docker-compose.rendered.yml
+                echo "Rendered docker-compose.rendered.yml:" && cat docker-compose.rendered.yml
+
+          - task: AzureWebAppContainer@1
+            displayName: Deploy multi-container compose to Web App
+            inputs:
+              azureSubscription: $(azureSubscription)
+              appName: $(webAppNameBackend)
+              multicontainerConfigFile: docker-compose.rendered.yml
+              appSettings: |
+                -DOCKER_REGISTRY_SERVER_URL=https://$(acrLoginServer)
+                -DOCKER_REGISTRY_SERVER_USERNAME=$(ACR_USER)
+                -DOCKER_REGISTRY_SERVER_PASSWORD=$(ACR_PASSWORD)
+
+      - job: OutputInfo
+        displayName: Output deployment info
+        steps:
+          - script: |
+              echo "Images deployed with tag $(imageTag) to $(acrLoginServer)"
+            displayName: Info

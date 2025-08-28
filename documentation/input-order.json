@@ -1,0 +1,87 @@
+{
+  "id": "<unique_order_id>",
+  "href": "<api_endpoint_url>",
+  "externalId": "<external_reference_id>",
+  "priority": "<priority_level>",
+  "category": "FiberInstallation",
+  "state": "acknowledged",
+  "orderDate": "<YYYY-MM-DDThh:mm:ssZ>",
+  "requestedCompletionDate": "<YYYY-MM-DDThh:mm:ssZ>",
+  "description": "<brief_description_of_task>",
+  "relatedParty": [
+    {
+      "id": "<customer_id>",
+      "role": "Customer",
+      "name": "<customer_name>",
+      "@referredType": "Individual"
+    },
+    {
+      "id": "<technician_id>",
+      "role": "Assignee",
+      "name": "<technician_name>",
+      "@referredType": "Individual"
+    }
+  ],
+  "serviceOrderItem": [
+    {
+      "id": "<item_id>",
+      "action": "add",
+      "service": {
+        "id": "<service_id>",
+        "category": "Broadband",
+        "serviceType": "Fiber",
+        "serviceSpecification": {
+          "id": "<spec_id>",
+          "name": "FiberBroadband",
+          "version": "1.0"
+        },
+        "serviceCharacteristic": [
+          {
+            "name": "Bandwidth",
+            "value": "<bandwidth_value>",
+            "valueType": "string"
+          },
+          {
+            "name": "ConnectionType",
+            "value": "FTTH",
+            "valueType": "string"
+          },
+          {
+            "name": "SplicingRequired",
+            "value": "<true/false>",
+            "valueType": "boolean"
+          }
+        ],
+        "place": [
+          {
+            "id": "<location_id>",
+            "role": "InstallationSite",
+            "@type": "GeographicAddress",
+            "street": "<street_address>",
+            "city": "<city>",
+            "postalCode": "<postal_code>",
+            "country": "<country>",
+            "geographicLocation": {
+              "latitude": "<latitude>",
+              "longitude": "<longitude>"
+            }
+          }
+        ]
+      }
+    }
+  ],
+  "note": [
+    {
+      "text": "<additional_instructions>",
+      "date": "<YYYY-MM-DDThh:mm:ssZ>",
+      "author": "<author_name>"
+    }
+  ],
+  "orderRelationship": [
+    {
+      "id": "<parent_order_id>",
+      "relationshipType": "dependsOn",
+      "href": "<parent_order_url>"
+    }
+  ]
+}

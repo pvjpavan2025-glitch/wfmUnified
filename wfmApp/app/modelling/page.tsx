@@ -93,13 +93,19 @@ export default function ModellingPage() {
         <p className="text-gray-600 mb-4">
           This is a modern, cloud-native WFM process execution engine integrated into your workforce management system.
         </p>
-        <div className="mt-4">
+        <div className="mt-4 space-x-4">
           <button 
             onClick={handleGetStarted}
             className="bg-blue-600 hover:bg-blue-700 text-white font-medium py-2 px-4 rounded"
           >
             Get Started
           </button>
+          <a
+            href="/modelling/enhanced"
+            className="bg-green-600 hover:bg-green-700 text-white font-medium py-2 px-4 rounded inline-block"
+          >
+            Enhanced Modelling
+          </a>
         </div>
       </div>
     </AppShell>

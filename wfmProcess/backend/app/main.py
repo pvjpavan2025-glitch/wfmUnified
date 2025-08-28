@@ -14,6 +14,7 @@ from .core.redis_client import redis_client
 from .core.mongodb import init_mongodb, close_mongodb
 from .engine.workflow_engine import WorkflowEngine, WorkflowExecutionError
 from .api.workflows import router as workflows_router
+from .api.enhanced_workflows import router as enhanced_workflows_router
 from .api.tasks import router as tasks_router
 from .api.executions import router as executions_router
 from .api.process_management import router as process_management_router
@@ -101,6 +102,7 @@ app.add_middleware(
 
 # Include API routers
 app.include_router(workflows_router, prefix=f"{settings.api_prefix}/workflows", tags=["workflows"])
+app.include_router(enhanced_workflows_router, prefix=f"{settings.api_prefix}/enhanced-workflows", tags=["enhanced-workflows"])
 app.include_router(tasks_router, prefix=f"{settings.api_prefix}/tasks", tags=["tasks"])
 app.include_router(executions_router, prefix=f"{settings.api_prefix}/executions", tags=["executions"])
 app.include_router(process_management_router, prefix=f"{settings.api_prefix}/processes", tags=["processes"])

@@ -6,14 +6,16 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { Table as TableComponent, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
-import { RefreshCw, Eye, Plus, Search, Filter, Building2, Users, UserPlus, Edit } from 'lucide-react';
+import { RefreshCw, Eye, Plus, Search, Filter, Building2, Users, UserPlus, Edit, List, Table } from 'lucide-react';
 import { ProtectedRoute } from '../../components/protected-route';
 import AppShell from '@/components/app-shell';
+import HierarchicalVendorsTable from '@/components/vendors/hierarchical-vendors-table';
+import NestedVendorsTableView from '@/components/vendors/nested-vendors-table-view';
 
 interface Vendor {
   id: string;
@@ -64,6 +66,7 @@ const VendorsPage = () => {
   const [activeTab, setActiveTab] = useState('vendors');
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
+  const [viewMode, setViewMode] = useState('hierarchical');
 
   useEffect(() => {
     fetchData();
@@ -233,78 +236,158 @@ const VendorsPage = () => {
     return matchesSearch && matchesStatus;
   });
 
+  // Calculate summary statistics
+  const totalVendors = filteredVendors.length;
+  const totalLeads = filteredLeads.length;
+  const totalTechnicians = filteredTechnicians.length;
+  const activeTechnicians = filteredTechnicians.filter(t => t.availability_status === 'available').length;
+
   return (
     <ProtectedRoute>
       <AppShell title="Vendor Management" subtitle="Manage vendors, technicians, and team leads">
         <div className="space-y-6">
-      <div className="flex justify-between items-center">
-        <div>
-          <h1 className="text-3xl font-bold">Vendor Management</h1>
-          <p className="text-muted-foreground">Manage vendors, technicians, and team leads</p>
-        </div>
-        <div className="flex gap-2">
-          <Button onClick={() => fetchData()}>
-            <RefreshCw className="mr-2 h-4 w-4" />
-            Refresh
-          </Button>
-          <Button>
-            <Plus className="mr-2 h-4 w-4" />
-            Add Vendor
-          </Button>
-        </div>
-      </div>
-
-      {/* Filters */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Filter className="h-5 w-5" />
-            Filters
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="flex gap-4">
-            <div className="flex-1">
-              <Input
-                placeholder="Search..."
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                className="max-w-sm"
-              />
+          <div className="flex justify-between items-center">
+            <div>
+              <h1 className="text-3xl font-bold">Vendor Management</h1>
+              <p className="text-muted-foreground">Manage vendors, technicians, and team leads</p>
             </div>
-            <Select value={statusFilter} onValueChange={setStatusFilter}>
-              <SelectTrigger className="w-[180px]">
-                <SelectValue placeholder="Status" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Statuses</SelectItem>
-                <SelectItem value="active">Active</SelectItem>
-                <SelectItem value="inactive">Inactive</SelectItem>
-                <SelectItem value="suspended">Suspended</SelectItem>
-              </SelectContent>
-            </Select>
+            <div className="flex gap-2">
+              <Button onClick={() => fetchData()}>
+                <RefreshCw className="mr-2 h-4 w-4" />
+                Refresh
+              </Button>
+              <Button>
+                <Plus className="mr-2 h-4 w-4" />
+                Add Vendor
+              </Button>
+            </div>
           </div>
-        </CardContent>
-      </Card>
 
-      {/* Main Content Tabs */}
-      <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-        <TabsList className="grid w-full grid-cols-3">
-          <TabsTrigger value="vendors" className="flex items-center gap-2">
-            <Building2 className="h-4 w-4" />
-            Vendors ({filteredVendors.length})
-          </TabsTrigger>
-          <TabsTrigger value="technicians" className="flex items-center gap-2">
-            <Users className="h-4 w-4" />
-            Technicians ({filteredTechnicians.length})
-          </TabsTrigger>
-          <TabsTrigger value="leads" className="flex items-center gap-2">
-            <UserPlus className="h-4 w-4" />
-            Team Leads ({filteredLeads.length})
-          </TabsTrigger>
-        </TabsList>
+          {/* Summary Stats - Single Line */}
+          <Card>
+            <CardContent className="py-4">
+              <div className="flex items-center justify-between w-full">
+                <div className="flex items-center space-x-2">
+                  <span className="text-sm font-medium text-muted-foreground">Total Vendors:</span>
+                  <span className="text-lg font-bold">{totalVendors}</span>
+                </div>
+                <div className="flex items-center space-x-2">
+                  <span className="text-sm font-medium text-muted-foreground">Team Leads:</span>
+                  <span className="text-lg font-bold">{totalLeads}</span>
+                </div>
+                <div className="flex items-center space-x-2">
+                  <span className="text-sm font-medium text-muted-foreground">Total Technicians:</span>
+                  <span className="text-lg font-bold">{totalTechnicians}</span>
+                </div>
+                <div className="flex items-center space-x-2">
+                  <span className="text-sm font-medium text-muted-foreground">Available Technicians:</span>
+                  <span className="text-lg font-bold text-green-600">{activeTechnicians}</span>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
 
-        <TabsContent value="vendors" className="space-y-4">
+          {/* Filters & View Options */}
+          <Card>
+            <CardContent className="py-4">
+              <div className="flex gap-4 items-center">
+                <Filter className="h-5 w-5 text-muted-foreground" />
+                
+                {/* Search Bar */}
+                <div className="relative flex-1">
+                  <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-4 w-4" />
+                  <Input
+                    type="text"
+                    placeholder="Search vendors, leads, or technicians..."
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                    className="pl-10"
+                  />
+                </div>
+                
+                <Select value={statusFilter} onValueChange={setStatusFilter}>
+                  <SelectTrigger className="w-40">
+                    <SelectValue placeholder="All Statuses" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Statuses</SelectItem>
+                    <SelectItem value="active">Active</SelectItem>
+                    <SelectItem value="inactive">Inactive</SelectItem>
+                    <SelectItem value="suspended">Suspended</SelectItem>
+                  </SelectContent>
+                </Select>
+                
+                {/* View Toggle Buttons */}
+                <div className="flex">
+                  <Button
+                    variant={viewMode === 'hierarchical' ? 'default' : 'outline'}
+                    size="sm"
+                    onClick={() => setViewMode('hierarchical')}
+                    className="rounded-r-none"
+                  >
+                    <List className="mr-2 h-4 w-4" />
+                    Hierarchical
+                  </Button>
+                  <Button
+                    variant={viewMode === 'table' ? 'default' : 'outline'}
+                    size="sm"
+                    onClick={() => setViewMode('table')}
+                    className="rounded-l-none"
+                  >
+                    <Table className="mr-2 h-4 w-4" />
+                    Table
+                  </Button>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Vendors Display */}
+          {viewMode === 'hierarchical' ? (
+            <HierarchicalVendorsTable
+              vendors={filteredVendors}
+              leads={filteredLeads}
+              technicians={filteredTechnicians}
+              searchTerm={searchTerm}
+              statusFilter={statusFilter}
+            />
+          ) : (
+            <Card>
+              <CardHeader>
+                <CardTitle>Vendors ({filteredVendors.length}) - Table View</CardTitle>
+                <CardDescription>Nested table view of vendors, team leads, and technicians</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <NestedVendorsTableView
+                  vendors={filteredVendors}
+                  leads={filteredLeads}
+                  technicians={filteredTechnicians}
+                  searchTerm={searchTerm}
+                  statusFilter={statusFilter}
+                />
+              </CardContent>
+            </Card>
+          )}
+
+          {/* Legacy Tabs - Hidden but kept for reference */}
+          <div className="hidden">
+            <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
+              <TabsList className="grid w-full grid-cols-3">
+                <TabsTrigger value="vendors" className="flex items-center gap-2">
+                  <Building2 className="h-4 w-4" />
+                  Vendors ({filteredVendors.length})
+                </TabsTrigger>
+                <TabsTrigger value="technicians" className="flex items-center gap-2">
+                  <Users className="h-4 w-4" />
+                  Technicians ({filteredTechnicians.length})
+                </TabsTrigger>
+                <TabsTrigger value="leads" className="flex items-center gap-2">
+                  <UserPlus className="h-4 w-4" />
+                  Team Leads ({filteredLeads.length})
+                </TabsTrigger>
+              </TabsList>
+
+              <TabsContent value="vendors" className="space-y-4">
           <Card>
             <CardHeader>
               <CardTitle>Vendors</CardTitle>
@@ -421,9 +504,9 @@ const VendorsPage = () => {
               )}
             </CardContent>
           </Card>
-        </TabsContent>
+              </TabsContent>
 
-        <TabsContent value="technicians" className="space-y-4">
+              <TabsContent value="technicians" className="space-y-4">
           <Card>
             <CardHeader>
               <CardTitle>Technicians</CardTitle>
@@ -500,9 +583,9 @@ const VendorsPage = () => {
               </Table>
             </CardContent>
           </Card>
-        </TabsContent>
+              </TabsContent>
 
-        <TabsContent value="leads" className="space-y-4">
+              <TabsContent value="leads" className="space-y-4">
           <Card>
             <CardHeader>
               <CardTitle>Team Leads</CardTitle>
@@ -565,16 +648,15 @@ const VendorsPage = () => {
               </Table>
             </CardContent>
           </Card>
-        </TabsContent>
-      </Tabs>
+              </TabsContent>
+            </Tabs>
+          </div>
 
-      {((activeTab === 'vendors' && filteredVendors.length === 0) ||
-        (activeTab === 'technicians' && filteredTechnicians.length === 0) ||
-        (activeTab === 'leads' && filteredLeads.length === 0)) && !loading && (
-        <div className="text-center py-12">
-          <p className="text-muted-foreground">No {activeTab} found matching your criteria.</p>
-        </div>
-      )}
+          {filteredVendors.length === 0 && !loading && (
+            <div className="text-center py-12">
+              <p className="text-muted-foreground">No vendors found matching your criteria.</p>
+            </div>
+          )}
         </div>
       </AppShell>
     </ProtectedRoute>

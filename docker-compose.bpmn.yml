@@ -1,0 +1,30 @@
+version: "3.8"
+
+services:
+  # wfmProcess Backend (BPMN Engine)
+  wfmprocess-backend:
+    build:
+      context: ./wfmProcess/backend
+      dockerfile: Dockerfile
+    container_name: wfm-bpmn-backend
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://workflow_user:workflow_pass@wfm-postgres:5432/workflow
+      - REDIS_URL=redis://wfm-redis:6379
+      - SECRET_KEY=your-super-secret-key-change-in-production
+      - DEBUG=true
+      - LOG_LEVEL=INFO
+    volumes:
+      - ./wfmProcess/backend:/app
+      - /app/__pycache__
+    ports:
+      - "8100:8000"
+    depends_on:
+      - wfm-postgres
+      - wfm-redis
+    networks:
+      - wfm-network
+    restart: unless-stopped
+
+networks:
+  wfm-network:
+    external: true

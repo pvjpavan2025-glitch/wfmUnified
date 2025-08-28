@@ -1,68 +1,7 @@
 version: "3.8"
 
-# WFM Unified System - Complete Orchestrator
-# This file manages all services with proper startup order and dependencies
-
 services:
-  # 1. DATABASES LAYER - Start First
-  postgres:
-    image: postgres:15
-    container_name: wfm-postgres
-    environment:
-      POSTGRES_DB: workflow
-      POSTGRES_USER: workflow_user
-      POSTGRES_PASSWORD: workflow_pass
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-      - ./wfmProcess/docker/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql
-    ports:
-      - "5432:5432"
-    networks:
-      - wfm-network
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U workflow_user -d workflow"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-
-  redis:
-    image: redis:7-alpine
-    container_name: wfm-redis
-    command: redis-server --appendonly yes
-    volumes:
-      - redis_data:/data
-    ports:
-      - "6379:6379"
-    networks:
-      - wfm-network
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-
-  mongodb:
-    image: mongo:7
-    container_name: wfm-mongodb
-    environment:
-      MONGO_INITDB_ROOT_USERNAME: wfmadmin
-      MONGO_INITDB_ROOT_PASSWORD: tsarolabs@12345#
-      MONGO_INITDB_DATABASE: wfm
-    volumes:
-      - mongodb_data:/data/db
-      - ./wfmServices/docker/mongo/init-mongo.js:/docker-entrypoint-initdb.d/init-mongo.js:ro
-    ports:
-      - "27017:27017"
-    networks:
-      - wfm-network
-    healthcheck:
-      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')", "--quiet"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 30s
-
-  # 2. BACKEND SERVICES LAYER - Start after databases are healthy
+  # WFM Backend Services
   api-gateway:
     build:
       context: ./wfmServices
@@ -83,10 +22,8 @@ services:
     networks:
       - wfm-network
     depends_on:
-      mongodb:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
+      - wfm-mongodb
+      - wfm-redis
 
   auth-service:
     build:
@@ -112,10 +49,8 @@ services:
       retries: 3
     command: ["python", "auth_service/simple_main.py"]
     depends_on:
-      mongodb:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
+      - wfm-mongodb
+      - wfm-redis
 
   config-service:
     build:
@@ -137,10 +72,8 @@ services:
     networks:
       - wfm-network
     depends_on:
-      mongodb:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
+      - wfm-mongodb
+      - wfm-redis
 
   rules-service:
     build:
@@ -164,10 +97,8 @@ services:
     networks:
       - wfm-network
     depends_on:
-      mongodb:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
+      - wfm-mongodb
+      - wfm-redis
 
   order-service:
     build:
@@ -191,10 +122,8 @@ services:
     networks:
       - wfm-network
     depends_on:
-      mongodb:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
+      - wfm-mongodb
+      - wfm-redis
 
   scheduler-service:
     build:
@@ -218,10 +147,8 @@ services:
     networks:
       - wfm-network
     depends_on:
-      mongodb:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
+      - wfm-mongodb
+      - wfm-redis
 
   issue-service:
     build:
@@ -245,10 +172,8 @@ services:
     networks:
       - wfm-network
     depends_on:
-      mongodb:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
+      - wfm-mongodb
+      - wfm-redis
 
   analytics-service:
     build:
@@ -270,10 +195,8 @@ services:
     networks:
       - wfm-network
     depends_on:
-      mongodb:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
+      - wfm-mongodb
+      - wfm-redis
 
   dashboard-service:
     build:
@@ -297,10 +220,8 @@ services:
     networks:
       - wfm-network
     depends_on:
-      mongodb:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
+      - wfm-mongodb
+      - wfm-redis
 
   vendor-service:
     build:
@@ -324,10 +245,8 @@ services:
     networks:
       - wfm-network
     depends_on:
-      mongodb:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
+      - wfm-mongodb
+      - wfm-redis
 
   process-service:
     build:
@@ -352,75 +271,9 @@ services:
     networks:
       - wfm-network
     depends_on:
-      mongodb:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-
-  # 3. BPMN PROCESS ENGINE LAYER - Start after backend services
-  wfmprocess-backend:
-    build:
-      context: ./wfmProcess/backend
-      dockerfile: Dockerfile
-    container_name: wfm-bpmn-backend
-    environment:
-      - DATABASE_URL=postgresql+asyncpg://workflow_user:workflow_pass@wfm-postgres:5432/workflow
-      - REDIS_URL=redis://wfm-redis:6379
-      - SECRET_KEY=your-super-secret-key-change-in-production
-      - DEBUG=true
-      - LOG_LEVEL=INFO
-    volumes:
-      - ./wfmProcess/backend:/app
-      - /app/__pycache__
-    ports:
-      - "8100:8000"
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-      api-gateway:
-        condition: service_started
-      auth-service:
-        condition: service_started
-    networks:
-      - wfm-network
-    restart: unless-stopped
-
-  # 4. FRONTEND LAYER - Start last after all backend services
-  wfmapp:
-    build:
-      context: ./wfmApp
-      dockerfile: Dockerfile
-    container_name: wfm_unified_frontend
-    restart: unless-stopped
-    ports:
-      - "3000:3000"
-    environment:
-      - NEXT_PUBLIC_AUTH_SERVICE_URL=http://localhost:8000
-      - NEXT_PUBLIC_API_GATEWAY_URL=http://localhost:8000
-      - NEXT_PUBLIC_BPMN_BACKEND_URL=http://localhost:8100
-    networks:
-      - wfm-network
-    depends_on:
-      api-gateway:
-        condition: service_started
-      wfmprocess-backend:
-        condition: service_started
+      - wfm-mongodb
+      - wfm-redis
 
 networks:
   wfm-network:
-    driver: bridge
-    ipam:
-      config:
-        - subnet: 172.20.0.0/16
-
-volumes:
-  postgres_data:
-    driver: local
-  redis_data:
-    driver: local
-  mongodb_data:
-    driver: local
-  wfm_logs:
-    driver: local
+    external: true

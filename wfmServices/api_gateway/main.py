@@ -85,12 +85,14 @@ def _env(name: str, default: str) -> str:
 
 SERVICE_URLS = {
     # Defaults intentionally empty in Azure (no in-container DNS like docker-compose)
-    "auth": _env("AUTH_SERVICE_URL", ""),
-    "config": _env("CONFIG_SERVICE_URL", ""),
-    "rules": _env("RULES_SERVICE_URL", ""),
-    "scheduler": _env("SCHEDULER_SERVICE_URL", ""),
-    "issue": _env("ISSUE_SERVICE_URL", ""),
-    "analytics": _env("ANALYTICS_SERVICE_URL", ""),
+    "auth": _env("AUTH_SERVICE_URL", "http://localhost:8001"),
+    "order": _env("ORDER_SERVICE_URL", "http://localhost:8002"),
+    "config": _env("CONFIG_SERVICE_URL", "http://localhost:8008"),
+    "rules": _env("RULES_SERVICE_URL", "http://localhost:8003"),
+    "scheduler": _env("SCHEDULER_SERVICE_URL", "http://localhost:8004"),
+    "issue": _env("ISSUE_SERVICE_URL", "http://localhost:8005"),
+    "analytics": _env("ANALYTICS_SERVICE_URL", "http://localhost:8006"),
+    "vendor": _env("VENDOR_SERVICE_URL", "http://localhost:8007"),
     "dashboard": _env("DASHBOARD_SERVICE_URL", ""),
 }
 
@@ -622,6 +624,167 @@ async def create_report(request: Request):
 async def get_metrics(request: Request):
     """Get metrics endpoint - forwards to analytics service."""
     return await forward_request(request, "analytics", "/metrics")
+
+
+# Order service endpoints
+@app.post("/orders")
+async def create_order(request: Request):
+    """Create order endpoint - forwards to order service."""
+    return await forward_request(request, "order", "/orders")
+
+
+@app.get("/orders/{order_id}")
+async def get_order(order_id: str, request: Request):
+    """Get order endpoint - forwards to order service."""
+    return await forward_request(request, "order", f"/orders/{order_id}")
+
+
+@app.get("/orders")
+async def list_orders(request: Request):
+    """List orders endpoint - forwards to order service."""
+    return await forward_request(request, "order", "/orders")
+
+
+@app.put("/orders/{order_id}")
+async def update_order(order_id: str, request: Request):
+    """Update order endpoint - forwards to order service."""
+    return await forward_request(request, "order", f"/orders/{order_id}")
+
+
+@app.delete("/orders/{order_id}")
+async def delete_order(order_id: str, request: Request):
+    """Delete order endpoint - forwards to order service."""
+    return await forward_request(request, "order", f"/orders/{order_id}")
+
+
+@app.get("/orders/{order_id}/details")
+async def get_order_details(order_id: str, request: Request):
+    """Get order with processes and tasks - forwards to order service."""
+    return await forward_request(request, "order", f"/orders/{order_id}/details")
+
+
+@app.post("/orders/{order_id}/refresh-progress")
+async def refresh_order_progress(order_id: str, request: Request):
+    """Refresh order progress - forwards to order service."""
+    return await forward_request(request, "order", f"/orders/{order_id}/refresh-progress")
+
+
+# Vendor service endpoints
+@app.post("/vendors")
+async def create_vendor(request: Request):
+    """Create vendor endpoint - forwards to vendor service."""
+    return await forward_request(request, "vendor", "/vendors")
+
+
+@app.get("/vendors/{vendor_id}")
+async def get_vendor(vendor_id: str, request: Request):
+    """Get vendor endpoint - forwards to vendor service."""
+    return await forward_request(request, "vendor", f"/vendors/{vendor_id}")
+
+
+@app.get("/vendors")
+async def list_vendors(request: Request):
+    """List vendors endpoint - forwards to vendor service."""
+    return await forward_request(request, "vendor", "/vendors")
+
+
+@app.put("/vendors/{vendor_id}")
+async def update_vendor(vendor_id: str, request: Request):
+    """Update vendor endpoint - forwards to vendor service."""
+    return await forward_request(request, "vendor", f"/vendors/{vendor_id}")
+
+
+@app.delete("/vendors/{vendor_id}")
+async def delete_vendor(vendor_id: str, request: Request):
+    """Delete vendor endpoint - forwards to vendor service."""
+    return await forward_request(request, "vendor", f"/vendors/{vendor_id}")
+
+
+# Technician endpoints
+@app.post("/technicians")
+async def create_technician(request: Request):
+    """Create technician endpoint - forwards to vendor service."""
+    return await forward_request(request, "vendor", "/technicians")
+
+
+@app.get("/technicians/{technician_id}")
+async def get_technician(technician_id: str, request: Request):
+    """Get technician endpoint - forwards to vendor service."""
+    return await forward_request(request, "vendor", f"/technicians/{technician_id}")
+
+
+@app.get("/vendors/{vendor_id}/technicians")
+async def get_technicians_by_vendor(vendor_id: str, request: Request):
+    """Get technicians by vendor - forwards to vendor service."""
+    return await forward_request(request, "vendor", f"/vendors/{vendor_id}/technicians")
+
+
+@app.get("/technicians/available")
+async def get_available_technicians(request: Request):
+    """Get available technicians - forwards to vendor service."""
+    return await forward_request(request, "vendor", "/technicians/available")
+
+
+@app.put("/technicians/{technician_id}")
+async def update_technician(technician_id: str, request: Request):
+    """Update technician endpoint - forwards to vendor service."""
+    return await forward_request(request, "vendor", f"/technicians/{technician_id}")
+
+
+@app.delete("/technicians/{technician_id}")
+async def delete_technician(technician_id: str, request: Request):
+    """Delete technician endpoint - forwards to vendor service."""
+    return await forward_request(request, "vendor", f"/technicians/{technician_id}")
+
+
+# Lead endpoints
+@app.post("/leads")
+async def create_lead(request: Request):
+    """Create lead endpoint - forwards to vendor service."""
+    return await forward_request(request, "vendor", "/leads")
+
+
+@app.get("/leads/{lead_id}")
+async def get_lead(lead_id: str, request: Request):
+    """Get lead endpoint - forwards to vendor service."""
+    return await forward_request(request, "vendor", f"/leads/{lead_id}")
+
+
+@app.get("/vendors/{vendor_id}/leads")
+async def get_leads_by_vendor(vendor_id: str, request: Request):
+    """Get leads by vendor - forwards to vendor service."""
+    return await forward_request(request, "vendor", f"/vendors/{vendor_id}/leads")
+
+
+@app.get("/technicians/{technician_id}/lead")
+async def get_lead_for_technician(technician_id: str, request: Request):
+    """Get lead for technician - forwards to vendor service."""
+    return await forward_request(request, "vendor", f"/technicians/{technician_id}/lead")
+
+
+@app.put("/leads/{lead_id}")
+async def update_lead(lead_id: str, request: Request):
+    """Update lead endpoint - forwards to vendor service."""
+    return await forward_request(request, "vendor", f"/leads/{lead_id}")
+
+
+@app.delete("/leads/{lead_id}")
+async def delete_lead(lead_id: str, request: Request):
+    """Delete lead endpoint - forwards to vendor service."""
+    return await forward_request(request, "vendor", f"/leads/{lead_id}")
+
+
+# Task assignment endpoints
+@app.post("/tasks/{task_id}/assign")
+async def assign_task(task_id: str, request: Request):
+    """Assign task endpoint - forwards to vendor service."""
+    return await forward_request(request, "vendor", f"/tasks/{task_id}/assign")
+
+
+@app.delete("/tasks/{task_id}/unassign")
+async def unassign_task(task_id: str, request: Request):
+    """Unassign task endpoint - forwards to vendor service."""
+    return await forward_request(request, "vendor", f"/tasks/{task_id}/unassign")
 
 
 # Dashboard service endpoints

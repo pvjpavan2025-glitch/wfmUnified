@@ -3,8 +3,9 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
-import { ChevronDown, ChevronRight, User, Calendar, RefreshCw, AlertCircle } from 'lucide-react';
+import { ChevronDown, ChevronRight, User, Calendar, RefreshCw, AlertCircle, Eye } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import TaskDetailsModal from '@/components/task-details-modal';
 
 interface TaskInstance {
   id: string;
@@ -57,6 +58,8 @@ const HierarchicalOrdersTable: React.FC<HierarchicalOrdersTableProps> = ({
   const [expandedOrders, setExpandedOrders] = useState<Set<string>>(new Set());
   const [expandedProcesses, setExpandedProcesses] = useState<Set<string>>(new Set());
   const [loadingProcesses, setLoadingProcesses] = useState<Set<string>>(new Set());
+  const [selectedTask, setSelectedTask] = useState<TaskInstance | null>(null);
+  const [isTaskModalOpen, setIsTaskModalOpen] = useState(false);
 
   const toggleOrderExpansion = async (orderId: string) => {
     const newExpanded = new Set(expandedOrders);
@@ -95,6 +98,16 @@ const HierarchicalOrdersTable: React.FC<HierarchicalOrdersTableProps> = ({
       newExpanded.add(processId);
     }
     setExpandedProcesses(newExpanded);
+  };
+
+  const handleTaskDetailsClick = (task: TaskInstance) => {
+    setSelectedTask(task);
+    setIsTaskModalOpen(true);
+  };
+
+  const handleCloseTaskModal = () => {
+    setIsTaskModalOpen(false);
+    setSelectedTask(null);
   };
 
   const getStatusBadgeVariant = (status: string) => {
@@ -310,6 +323,18 @@ const HierarchicalOrdersTable: React.FC<HierarchicalOrdersTableProps> = ({
                                         {task.status === 'pending' && !task.assigned_technician_id && (
                                           <AlertCircle className="h-4 w-4 text-orange-500" />
                                         )}
+                                        
+                                        <Button
+                                          variant="ghost"
+                                          size="sm"
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            handleTaskDetailsClick(task);
+                                          }}
+                                          className="h-8 w-8 p-0"
+                                        >
+                                          <Eye className="h-4 w-4" />
+                                        </Button>
                                       </div>
                                     </div>
                                   </div>
@@ -327,6 +352,15 @@ const HierarchicalOrdersTable: React.FC<HierarchicalOrdersTableProps> = ({
           })}
         </div>
       </CardContent>
+      
+      {/* Task Details Modal */}
+      {selectedTask && (
+        <TaskDetailsModal
+          task={selectedTask}
+          isOpen={isTaskModalOpen}
+          onClose={handleCloseTaskModal}
+        />
+      )}
     </Card>
   );
 };

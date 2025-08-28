@@ -4,8 +4,9 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { ChevronDown, ChevronRight, User, Calendar, RefreshCw, AlertCircle } from 'lucide-react';
+import { ChevronDown, ChevronRight, User, Calendar, RefreshCw, AlertCircle, Eye } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import TaskDetailsModal from '@/components/task-details-modal';
 
 interface TaskInstance {
   id: string;
@@ -57,6 +58,8 @@ const NestedTableView: React.FC<NestedTableViewProps> = ({
 }) => {
   const [expandedOrders, setExpandedOrders] = useState<Set<string>>(new Set());
   const [expandedProcesses, setExpandedProcesses] = useState<Set<string>>(new Set());
+  const [selectedTask, setSelectedTask] = useState<TaskInstance | null>(null);
+  const [isTaskModalOpen, setIsTaskModalOpen] = useState(false);
 
   const toggleOrderExpansion = (orderId: string) => {
     const newExpanded = new Set(expandedOrders);
@@ -83,6 +86,16 @@ const NestedTableView: React.FC<NestedTableViewProps> = ({
       newExpanded.add(processId);
     }
     setExpandedProcesses(newExpanded);
+  };
+
+  const handleTaskDetailsClick = (task: TaskInstance) => {
+    setSelectedTask(task);
+    setIsTaskModalOpen(true);
+  };
+
+  const handleCloseTaskModal = () => {
+    setIsTaskModalOpen(false);
+    setSelectedTask(null);
   };
 
   const getStatusBadgeVariant = (status: string) => {
@@ -306,7 +319,19 @@ const NestedTableView: React.FC<NestedTableViewProps> = ({
                                 )}
                               </div>
                             </TableCell>
-                            <TableCell></TableCell>
+                            <TableCell>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleTaskDetailsClick(task);
+                                }}
+                                className="h-8 w-8 p-0"
+                              >
+                                <Eye className="h-4 w-4" />
+                              </Button>
+                            </TableCell>
                           </TableRow>
                         ))}
                       </React.Fragment>
@@ -318,6 +343,15 @@ const NestedTableView: React.FC<NestedTableViewProps> = ({
           </TableBody>
         </Table>
       </CardContent>
+
+      {/* Task Details Modal */}
+      {selectedTask && (
+        <TaskDetailsModal
+          task={selectedTask}
+          isOpen={isTaskModalOpen}
+          onClose={handleCloseTaskModal}
+        />
+      )}
     </Card>
   );
 };

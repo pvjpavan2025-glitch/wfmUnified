@@ -9,6 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
+import TaskDetailsModal from "./task-details-modal"
 import {
   LayoutDashboard,
   CheckSquare,
@@ -66,6 +67,7 @@ export default function TaskManagement() {
   const [tasks, setTasks] = useState<TaskInstance[]>([])
   const [selectedTask, setSelectedTask] = useState<TaskInstance | null>(null)
   const [loading, setLoading] = useState(true)
+  const [isTaskDetailsOpen, setIsTaskDetailsOpen] = useState(false)
 
   useEffect(() => {
     fetchTasks()
@@ -404,95 +406,16 @@ export default function TaskManagement() {
                     </TableCell>
                     <TableCell>
                       <div className="flex gap-2">
-                        <Dialog>
-                          <DialogTrigger asChild>
-                            <Button 
-                              variant="outline" 
-                              size="sm"
-                              onClick={() => setSelectedTask(task)}
-                            >
-                              <Eye className="h-4 w-4" />
-                            </Button>
-                          </DialogTrigger>
-                          <DialogContent className="max-w-2xl">
-                            <DialogHeader>
-                              <DialogTitle>Task Details - {selectedTask?.name}</DialogTitle>
-                              <DialogDescription>
-                                View task information and progress
-                              </DialogDescription>
-                            </DialogHeader>
-                            {selectedTask && (
-                              <Tabs defaultValue="details" className="w-full">
-                                <TabsList>
-                                  <TabsTrigger value="details">Details</TabsTrigger>
-                                  <TabsTrigger value="assignment">Assignment</TabsTrigger>
-                                  <TabsTrigger value="timeline">Timeline</TabsTrigger>
-                                </TabsList>
-                                <TabsContent value="details" className="space-y-4">
-                                  <div className="grid grid-cols-2 gap-4">
-                                    <div>
-                                      <h4 className="font-semibold">Task Information</h4>
-                                      <p><strong>Name:</strong> {selectedTask.name}</p>
-                                      <p><strong>Type:</strong> {selectedTask.type}</p>
-                                      <p><strong>Status:</strong> {selectedTask.status}</p>
-                                      <p><strong>Priority:</strong> {selectedTask.priority}</p>
-                                      <p><strong>Description:</strong> {selectedTask.description}</p>
-                                    </div>
-                                    <div>
-                                      <h4 className="font-semibold">Process Context</h4>
-                                      <p><strong>Process:</strong> {selectedTask.process_definition_key}</p>
-                                      <p><strong>Order ID:</strong> {selectedTask.order_id}</p>
-                                      <p><strong>Process ID:</strong> {selectedTask.process_id}</p>
-                                      <p><strong>Duration:</strong> {selectedTask.estimated_duration}min</p>
-                                    </div>
-                                  </div>
-                                  <div>
-                                    <h4 className="font-semibold">Required Skills</h4>
-                                    <div className="flex gap-2 mt-2">
-                                      {selectedTask.required_skills.map((skill) => (
-                                        <Badge key={skill} variant="outline">{skill}</Badge>
-                                      ))}
-                                    </div>
-                                  </div>
-                                </TabsContent>
-                                <TabsContent value="assignment">
-                                  <div className="space-y-4">
-                                    <div>
-                                      <h4 className="font-semibold">Current Assignment</h4>
-                                      <p><strong>Technician:</strong> {selectedTask.technician_name || 'Unassigned'}</p>
-                                      <p><strong>Lead:</strong> {selectedTask.lead_name || 'Unassigned'}</p>
-                                    </div>
-                                    {!selectedTask.assigned_technician_id && (
-                                      <Button onClick={() => {/* Open assignment form */}}>
-                                        <UserCheck className="h-4 w-4 mr-2" />
-                                        Assign Task
-                                      </Button>
-                                    )}
-                                  </div>
-                                </TabsContent>
-                                <TabsContent value="timeline">
-                                  <div className="space-y-4">
-                                    <div>
-                                      <h4 className="font-semibold">Schedule</h4>
-                                      <p><strong>Scheduled Start:</strong> {selectedTask.scheduled_start ? new Date(selectedTask.scheduled_start).toLocaleString() : 'Not scheduled'}</p>
-                                      <p><strong>Scheduled End:</strong> {selectedTask.scheduled_end ? new Date(selectedTask.scheduled_end).toLocaleString() : 'Not scheduled'}</p>
-                                    </div>
-                                    <div>
-                                      <h4 className="font-semibold">Actual Times</h4>
-                                      <p><strong>Actual Start:</strong> {selectedTask.actual_start ? new Date(selectedTask.actual_start).toLocaleString() : 'Not started'}</p>
-                                      <p><strong>Actual End:</strong> {selectedTask.actual_end ? new Date(selectedTask.actual_end).toLocaleString() : 'Not completed'}</p>
-                                    </div>
-                                    <div>
-                                      <h4 className="font-semibold">Timestamps</h4>
-                                      <p><strong>Created:</strong> {new Date(selectedTask.created_at).toLocaleString()}</p>
-                                      <p><strong>Updated:</strong> {new Date(selectedTask.updated_at).toLocaleString()}</p>
-                                    </div>
-                                  </div>
-                                </TabsContent>
-                              </Tabs>
-                            )}
-                          </DialogContent>
-                        </Dialog>
+                        <Button 
+                          variant="outline" 
+                          size="sm"
+                          onClick={() => {
+                            setSelectedTask(task);
+                            setIsTaskDetailsOpen(true);
+                          }}
+                        >
+                          <Eye className="h-4 w-4" />
+                        </Button>
                         {task.status === 'in_progress' && (
                           <Button 
                             variant="outline" 
@@ -517,6 +440,12 @@ export default function TaskManagement() {
           <p className="text-muted-foreground">No tasks found matching your criteria.</p>
         </div>
       )}
+
+      <TaskDetailsModal 
+        task={selectedTask}
+        isOpen={isTaskDetailsOpen}
+        onClose={() => setIsTaskDetailsOpen(false)}
+      />
     </div>
   )
 }

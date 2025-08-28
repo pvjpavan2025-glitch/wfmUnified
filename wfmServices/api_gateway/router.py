@@ -15,11 +15,13 @@ class APIRouter:
     def __init__(self):
         self.service_urls = {
             "auth": "http://localhost:8001",
-            "config": "http://localhost:8002",
+            "order": "http://localhost:8002",
             "rules": "http://localhost:8003",
             "scheduler": "http://localhost:8004",
             "issue": "http://localhost:8005",
-            "analytics": "http://localhost:8006"
+            "analytics": "http://localhost:8006",
+            "vendor": "http://localhost:8007",
+            "config": "http://localhost:8008"
         }
     
     async def route_request(self, request: Request, service: str, path: str) -> JSONResponse:
@@ -78,6 +80,10 @@ class APIRouter:
         """Determine service based on path."""
         if path.startswith("/auth") or path.startswith("/users"):
             return "auth"
+        elif path.startswith("/orders"):
+            return "order"
+        elif path.startswith("/vendors") or path.startswith("/technicians") or path.startswith("/leads") or path.startswith("/tasks"):
+            return "vendor"
         elif path.startswith("/configs"):
             return "config"
         elif path.startswith("/rules"):

@@ -37,17 +37,19 @@ class AuthService {
     try {
       console.log('AuthService: Attempting login with:', credentials);
       
+      const loginData = credentials;
+      
       const response = await fetch(`${API_CONFIG.AUTH_SERVICE}${API_CONFIG.ENDPOINTS.AUTH.LOGIN}`, {
         method: 'POST',
         headers: {
           'Content-Type': API_CONFIG.HEADERS.CONTENT_TYPE,
         },
-        body: JSON.stringify(credentials),
+        body: JSON.stringify(loginData),
       });
 
       if (!response.ok) {
         if (response.status === 401) {
-          throw new Error('Invalid username, password, or tenant ID');
+          throw new Error('Invalid username or password');
         } else if (response.status === 400) {
           const errorData = await response.json();
           throw new Error(errorData.detail || 'Invalid request data');

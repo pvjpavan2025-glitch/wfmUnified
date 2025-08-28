@@ -161,10 +161,10 @@ async def login(request: Request):
         password = body.get("password")
         tenant_id = body.get("tenant_id")
         
-        if not username or not password or not tenant_id:
+        if not username or not password:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Username, password, and tenant_id are required"
+                detail="Username and password are required"
             )
         
         # Get database connection
@@ -178,7 +178,6 @@ async def login(request: Request):
         # Find user
         user = await database.users.find_one({
             "username": username,
-            "tenant_id": ObjectId(tenant_id),
             "status": "active"
         })
         
@@ -211,7 +210,6 @@ async def login(request: Request):
         access_token_payload = {
             "user_id": str(user["_id"]),
             "username": user["username"],
-            "tenant_id": str(user["tenant_id"]),
             "roles": roles
         }
         token = token_manager.create_access_token(access_token_payload)
@@ -230,7 +228,6 @@ async def login(request: Request):
             "first_name": user["first_name"],
             "last_name": user["last_name"],
             "roles": roles,
-            "tenant_id": str(user["tenant_id"]),
             "status": user["status"],
             "permissions": []  # TODO: Add permissions logic
         }
@@ -347,7 +344,6 @@ async def verify_token_endpoint(request: Request):
             "first_name": user["first_name"],
             "last_name": user["last_name"],
             "roles": roles,
-            "tenant_id": str(user["tenant_id"]),
             "status": user["status"],
             "permissions": []
         }
@@ -390,14 +386,12 @@ async def mint_test_token(request: Request):
 
         user_id = body.get("user_id", "local-dev")
         username = body.get("username", "devuser")
-        tenant_id = body.get("tenant_id", "default-tenant")
         roles = body.get("roles", ["admin"]) or ["admin"]
 
         # Use token_manager to ensure correct claims including "type": "access"
         token = token_manager.create_access_token({
             "user_id": user_id,
             "username": username,
-            "tenant_id": tenant_id,
             "roles": roles,
         })
 
@@ -408,7 +402,6 @@ async def mint_test_token(request: Request):
             "user": {
                 "id": user_id,
                 "username": username,
-                "tenant_id": tenant_id,
                 "roles": roles,
             },
         }

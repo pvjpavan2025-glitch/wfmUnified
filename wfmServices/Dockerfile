@@ -1,39 +1,33 @@
 FROM python:3.11-slim
 
-# Set working directory
-WORKDIR /app
-
 # Set environment variables
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
+ENV PIP_NO_CACHE_DIR=1
+ENV PIP_DISABLE_PIP_VERSION_CHECK=1
 
-# Install system dependencies
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends \
-        build-essential \
-        curl \
-        ca-certificates \
-    && update-ca-certificates \
-    && rm -rf /var/lib/apt/lists/*
+# Set working directory
+WORKDIR /app
 
-# Copy requirements and install Python dependencies
+# Install system dependencies in single layer
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl \
+    && rm -rf /var/lib/apt/lists/* \
+    && apt-get clean
+
+# Copy and install Python dependencies first (for better caching)
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
-
-# Copy application code
-COPY . .
+RUN pip install --no-cache-dir --upgrade pip setuptools wheel \
+    && pip install --no-cache-dir -r requirements.txt
 
 # Create logs directory
 RUN mkdir -p /app/logs
 
+# Copy application code (do this last for better layer caching)
+COPY . .
+
 # Expose port
 EXPOSE 8000
 
-# Build argument for service name
-ARG SERVICE_NAME=api_gateway
-
-# Create a startup script
-RUN echo '#!/bin/bash\npython -m '"$SERVICE_NAME"'.main' > /app/start.sh && chmod +x /app/start.sh
-
-# Default command (can be overridden)
-CMD ["/app/start.sh"] 
+# Default command
+CMD ["python", "-m", "api_gateway.main"] 

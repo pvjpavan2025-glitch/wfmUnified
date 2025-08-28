@@ -18,7 +18,6 @@ from pydantic import BaseModel
 class LoginRequest(BaseModel):
     username: str
     password: str
-    tenant_id: Optional[str] = "default"
 
 class LoginResponse(BaseModel):
     access_token: str
@@ -109,7 +108,6 @@ MOCK_USERS = {
         "password_hash": get_password_hash("admin123"),
         "roles": ["Admin"],
         "status": "active",
-        "tenant_id": "default"
     },
     "technician": {
         "id": "2",
@@ -119,15 +117,14 @@ MOCK_USERS = {
         "last_name": "User",
         "password_hash": get_password_hash("tech123"),
         "roles": ["Technician"],
-        "status": "active",
-        "tenant_id": "default"
+        "status": "active"
     }
 }
 
-async def authenticate_user(username: str, password: str, tenant_id: str = "default") -> Optional[dict]:
+async def authenticate_user(username: str, password: str) -> Optional[dict]:
     """Authenticate user with username/password."""
     user = MOCK_USERS.get(username)
-    if not user or user["tenant_id"] != tenant_id:
+    if not user:
         return None
     
     if not verify_password(password, user["password_hash"]):
@@ -150,7 +147,7 @@ async def login(login_data: LoginRequest):
     try:
         # Authenticate user
         user = await authenticate_user(
-            login_data.username, login_data.password, login_data.tenant_id or "default"
+            login_data.username, login_data.password
         )
         
         if not user:

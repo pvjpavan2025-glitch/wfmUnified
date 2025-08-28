@@ -39,6 +39,7 @@ services:
       timeout: 5s
       retries: 5
 
+
   # wfmProcess Backend (BPMN Engine)
   wfmprocess-backend:
     build:
@@ -89,25 +90,19 @@ services:
   auth-service:
     build:
       context: ./wfmServices
-      dockerfile: Dockerfile
-      args:
-        SERVICE_NAME: auth_service
+      dockerfile: Dockerfile.auth
     container_name: wfm_auth_service
     restart: unless-stopped
     ports:
       - "8001:8001"
-    environment:
-      - MONGODB_URL=mongodb+srv://wfmadmin:tsarolabs%4012345%23@wfmdb.cvkb04l.mongodb.net/?retryWrites=true&w=majority&appName=wfmDB
-      - REDIS_URL=redis://default:kIdJfI3xoLxHiKFnCrkGBYffiDla8Y9h@redis-15514.c56.east-us.azure.redns.redis-cloud.com:15514
-      - DATABASE_NAME=wfm
-      - JWT_SECRET_KEY=wfmv4-super-secret-jwt-key-change-in-production
-      - ENVIRONMENT=production
-      - ENV_FILE=env.online
-    volumes:
-      - ./wfmServices/logs:/app/logs
     networks:
       - wfm-network
-    command: ["python", "-m", "auth_service.main"]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    command: ["python", "auth_service/simple_main.py"]
 
   config-service:
     build:

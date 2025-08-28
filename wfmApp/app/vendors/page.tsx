@@ -12,6 +12,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { RefreshCw, Eye, Plus, Search, Filter, Building2, Users, UserPlus, Edit } from 'lucide-react';
+import { ProtectedRoute } from '../../components/protected-route';
+import AppShell from '@/components/app-shell';
 
 interface Vendor {
   id: string;
@@ -232,7 +234,9 @@ const VendorsPage = () => {
   });
 
   return (
-    <div className="container mx-auto p-6 space-y-6">
+    <ProtectedRoute>
+      <AppShell title="Vendor Management" subtitle="Manage vendors, technicians, and team leads">
+        <div className="space-y-6">
       <div className="flex justify-between items-center">
         <div>
           <h1 className="text-3xl font-bold">Vendor Management</h1>
@@ -571,7 +575,9 @@ const VendorsPage = () => {
           <p className="text-muted-foreground">No {activeTab} found matching your criteria.</p>
         </div>
       )}
-    </div>
+        </div>
+      </AppShell>
+    </ProtectedRoute>
   );
 };
 

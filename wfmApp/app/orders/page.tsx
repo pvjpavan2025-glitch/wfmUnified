@@ -11,6 +11,8 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, Di
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Progress } from '@/components/ui/progress';
 import { RefreshCw, Eye, Plus, Search, Filter } from 'lucide-react';
+import { ProtectedRoute } from '../../components/protected-route';
+import AppShell from '@/components/app-shell';
 
 interface Order {
   id: string;
@@ -212,7 +214,9 @@ const OrdersPage = () => {
   });
 
   return (
-    <div className="container mx-auto p-6 space-y-6">
+    <ProtectedRoute>
+      <AppShell title="Orders" subtitle="Manage and track order processing">
+        <div className="space-y-6">
       <div className="flex justify-between items-center">
         <div>
           <h1 className="text-3xl font-bold">Orders</h1>
@@ -451,7 +455,9 @@ const OrdersPage = () => {
           )}
         </CardContent>
       </Card>
-    </div>
+        </div>
+      </AppShell>
+    </ProtectedRoute>
   );
 };
 

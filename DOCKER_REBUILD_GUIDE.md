@@ -151,6 +151,18 @@ For experienced users, here's the complete rebuild in one command:
 docker-compose down && docker container prune -f && docker image ls | grep wfmunified | awk '{print $1":"$2}' | xargs -r docker image rm && docker image prune -f && docker-compose build --no-cache && docker-compose up -d
 ```
 
+## Separate builds:
+
+### Build only FE
+docker-compose build --no-cache wfmapp
+docker-compose up -d
+
+### Build but DONT start
+- Start all other services first:
+  - docker-compose up -d --scale wfmapp=0
+- Build wfmApp separately later:
+  - docker-compose build wfmapp && docker-compose up -d wfmapp
+
 ## Notes
 
 - The rebuild process removes ALL containers and images, ensuring a completely fresh start

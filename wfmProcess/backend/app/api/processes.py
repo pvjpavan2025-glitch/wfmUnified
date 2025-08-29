@@ -25,9 +25,51 @@ async def health_check():
         "timestamp": "2024-01-01T00:00:00Z"
     }
 
+# Process Instance Routes (list all)
+@router.get("/instances", response_model=List[ProcessInstanceSummary])
+async def list_process_instances(
+    skip: int = Query(0, ge=0, description="Number of records to skip"),
+    limit: int = Query(100, ge=1, le=1000, description="Maximum number of records to return"),
+    process_id: Optional[str] = Query(None, description="Filter by process ID"),
+    status: Optional[str] = Query(None, description="Filter by instance status"),
+    db = Depends(get_mongodb_db)
+):
+    """List all process instances with filtering and pagination."""
+    try:
+        process_service = ProcessService(db)
+        instances = await process_service.list_process_instances(
+            skip=skip,
+            limit=limit,
+            process_id=process_id,
+            status=status
+        )
+        return instances
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
-
-
+# Template Management Routes (list all)
+@router.get("/templates", response_model=List[TemplateSummary])
+async def list_templates(
+    skip: int = Query(0, ge=0, description="Number of records to skip"),
+    limit: int = Query(100, ge=1, le=1000, description="Maximum number of records to return"),
+    category: Optional[str] = Query(None, description="Filter by category"),
+    is_public: Optional[bool] = Query(None, description="Filter by public status"),
+    is_active: Optional[bool] = Query(None, description="Filter by active status"),
+    db = Depends(get_mongodb_db)
+):
+    """List all templates with filtering and pagination."""
+    try:
+        template_service = TemplateService(db)
+        templates = await template_service.list_templates(
+            skip=skip,
+            limit=limit,
+            category=category,
+            is_public=is_public,
+            is_active=is_active
+        )
+        return templates
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 # Process Management Routes
 @router.post("/", response_model=Process, status_code=201)
@@ -125,7 +167,7 @@ async def delete_process(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-# Process Instance Routes
+# Process Instance Routes (specific process)
 @router.post("/{process_id}/instances", response_model=ProcessInstance, status_code=201)
 async def create_process_instance(
     process_id: str = Path(..., description="Process ID"),
@@ -149,28 +191,6 @@ async def create_process_instance(
         return instance
     except HTTPException:
         raise
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
-
-
-@router.get("/instances", response_model=List[ProcessInstanceSummary])
-async def list_process_instances(
-    skip: int = Query(0, ge=0, description="Number of records to skip"),
-    limit: int = Query(100, ge=1, le=1000, description="Maximum number of records to return"),
-    process_id: Optional[str] = Query(None, description="Filter by process ID"),
-    status: Optional[str] = Query(None, description="Filter by instance status"),
-    db = Depends(get_mongodb_db)
-):
-    """List all process instances with filtering and pagination."""
-    try:
-        process_service = ProcessService(db)
-        instances = await process_service.list_process_instances(
-            skip=skip,
-            limit=limit,
-            process_id=process_id,
-            status=status
-        )
-        return instances
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -212,6 +232,40 @@ async def update_process_instance(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.delete("/instances/{instance_id}")
+async def delete_process_instance(
+    instance_id: str = Path(..., description="Instance ID or instance_id field"),
+    db = Depends(get_mongodb_db)
+):
+    """Delete a process instance."""
+    try:
+        process_service = ProcessService(db)
+        success = await process_service.delete_process_instance(instance_id)
+        if not success:
+            raise HTTPException(status_code=404, detail="Process instance not found")
+        return {"message": "Process instance deleted successfully"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/instances/{instance_id}/execute")
+async def execute_process_instance(
+    instance_id: str = Path(..., description="Instance ID or instance_id field"),
+    db = Depends(get_mongodb_db)
+):
+    """Execute a process instance."""
+    try:
+        process_service = ProcessService(db)
+        result = await process_service.execute_process_instance(instance_id)
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 # Template Management Routes
 @router.post("/templates", response_model=Template, status_code=201)
 async def create_template(
@@ -242,30 +296,6 @@ async def create_template_from_process(
         return template
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
-
-
-@router.get("/templates", response_model=List[TemplateSummary])
-async def list_templates(
-    skip: int = Query(0, ge=0, description="Number of records to skip"),
-    limit: int = Query(100, ge=1, le=1000, description="Maximum number of records to return"),
-    category: Optional[str] = Query(None, description="Filter by category"),
-    is_public: Optional[bool] = Query(None, description="Filter by public status"),
-    is_active: Optional[bool] = Query(None, description="Filter by active status"),
-    db = Depends(get_mongodb_db)
-):
-    """List all templates with filtering and pagination."""
-    try:
-        template_service = TemplateService(db)
-        templates = await template_service.list_templates(
-            skip=skip,
-            limit=limit,
-            category=category,
-            is_public=is_public,
-            is_active=is_active
-        )
-        return templates
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.get("/templates/{template_id}", response_model=Template)

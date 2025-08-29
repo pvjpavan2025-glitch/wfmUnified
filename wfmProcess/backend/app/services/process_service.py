@@ -26,20 +26,23 @@ class ProcessService:
     async def create_process(self, process_data: ProcessCreate, user_id: str) -> Process:
         """Create a new process."""
         try:
-            # Generate unique process ID if not provided
-            if not process_data.process_id:
-                process_data.process_id = f"process_{uuid.uuid4().hex[:8]}"
+            # Generate unique process ID
+            process_id = f"process_{uuid.uuid4().hex[:8]}"
             
             # Create process document
             process_dict = process_data.dict()
+            process_dict["process_id"] = process_id
             process_dict["created_by"] = user_id
             process_dict["updated_by"] = user_id
             process_dict["created_at"] = datetime.utcnow()
             process_dict["updated_at"] = datetime.utcnow()
+            process_dict["status"] = "active"  # Set default status
             
             # Insert into database
             result = await self.db.processes.insert_one(process_dict)
-            process_dict["_id"] = result.inserted_id
+            
+            # Convert ObjectId to string for the response
+            process_dict["_id"] = str(result.inserted_id)
             
             return Process(**process_dict)
             
@@ -93,8 +96,23 @@ class ProcessService:
             cursor = self.db.processes.find(filter_query).skip(skip).limit(limit).sort("updated_at", -1)
             processes = await cursor.to_list(length=limit)
             
-            # Convert to ProcessSummary
-            return [ProcessSummary(**process) for process in processes]
+            # Convert to ProcessSummary with proper field mapping
+            process_summaries = []
+            for process in processes:
+                # Convert ObjectId to string
+                process["_id"] = str(process["_id"])
+                
+                # Ensure required fields exist with defaults
+                if "execution_count" not in process:
+                    process["execution_count"] = 0
+                if "last_executed_at" not in process:
+                    process["last_executed_at"] = None
+                if "status" not in process:
+                    process["status"] = "active"
+                
+                process_summaries.append(ProcessSummary(**process))
+            
+            return process_summaries
             
         except Exception as e:
             raise Exception(f"Failed to list processes: {str(e)}")

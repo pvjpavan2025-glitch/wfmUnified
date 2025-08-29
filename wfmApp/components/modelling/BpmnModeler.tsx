@@ -62,8 +62,10 @@ const BpmnModelerComponent: React.FC<BpmnModelerProps> = ({ onSave, onClose }) =
         // Wait for the modeler to be ready
         await new Promise(resolve => setTimeout(resolve, 500));
 
-        // Create a simple BPMN diagram
-        await newModeler.createDiagram();
+        // Create a simple BPMN diagram if the method exists
+        if (typeof newModeler.createDiagram === 'function') {
+          await newModeler.createDiagram();
+        }
         
         // Set up event listeners
         const eventBus = newModeler.get('eventBus') as any;
@@ -82,7 +84,6 @@ const BpmnModelerComponent: React.FC<BpmnModelerProps> = ({ onSave, onClose }) =
         const { xml: newXml } = await newModeler.saveXML({ format: true });
         setXml(newXml || '');
         setError('');
-        console.log('Diagram created successfully');
 
         setModeler(newModeler);
       } catch (err) {
@@ -106,7 +107,6 @@ const BpmnModelerComponent: React.FC<BpmnModelerProps> = ({ onSave, onClose }) =
     // Toggle transaction boundaries visualization
     setShowTransactionBoundaries(!showTransactionBoundaries);
     // This would integrate with actual transaction boundary logic
-    console.log('Transaction boundaries toggled:', !showTransactionBoundaries);
   };
 
   const handleApplyColorTheme = (theme: string) => {

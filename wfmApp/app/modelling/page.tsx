@@ -52,35 +52,53 @@ export default function ModellingPage() {
     try {
       switch (activeTab) {
         case 'manage-processes':
-          const processesResponse = await processApiService.listProcesses();
-          if (processesResponse.data) {
-            setProcesses(processesResponse.data.processes);
-          } else if (processesResponse.error) {
-            setError(processesResponse.error);
+          try {
+            const processesResponse = await processApiService.listProcesses();
+            if (processesResponse.data) {
+              setProcesses(processesResponse.data);
+            } else if (processesResponse.error) {
+              setError(processesResponse.error);
+            }
+          } catch (err) {
+            // If there's an error, just set empty processes instead of throwing
+            setProcesses([]);
+            console.log('No processes found or error occurred:', err);
           }
           break;
           
         case 'instances':
-          // For now, we'll load instances from all processes
-          const allInstances: ProcessInstance[] = [];
-          const processesForInstances = await processApiService.listProcesses();
-          if (processesForInstances.data) {
-            for (const process of processesForInstances.data.processes) {
-              const instancesResponse = await processApiService.listProcessInstances(process.id);
-              if (instancesResponse.data) {
-                allInstances.push(...instancesResponse.data.instances);
+          try {
+            // For now, we'll load instances from all processes
+            const allInstances: ProcessInstance[] = [];
+            const processesForInstances = await processApiService.listProcesses();
+            if (processesForInstances.data) {
+              for (const process of processesForInstances.data) {
+                const instancesResponse = await processApiService.listProcessInstances(process.id);
+                if (instancesResponse.data) {
+                  allInstances.push(...instancesResponse.data);
+                }
               }
             }
             setInstances(allInstances);
+          } catch (err) {
+            // If there's an error, just set empty instances instead of throwing
+            setInstances([]);
+            console.log('No instances found or error occurred:', err);
           }
           break;
           
         case 'templates':
-          const templatesResponse = await processApiService.listTemplates();
-          if (templatesResponse.data) {
-            setTemplates(templatesResponse.data.templates);
-          } else if (templatesResponse.error) {
-            setError(templatesResponse.error);
+          try {
+            const templatesResponse = await processApiService.listTemplates();
+            if (templatesResponse.data) {
+              setTemplates(templatesResponse.data);
+            } else if (templatesResponse.error) {
+              setError(templatesResponse.error);
+            }
+          } catch (err) {
+            // If there's an error, just set empty templates instead of throwing
+            setTemplates([]);
+            console.log('No templates found or error occurred:', err);
           }
           break;
       }
@@ -121,7 +139,7 @@ export default function ModellingPage() {
         tenant_id: "default"
       };
 
-      const response = await processApiService.createProcess(processData);
+      const response = await processApiService.createProcess(processData, "current_user");
       if (response.data) {
         alert('Process saved successfully!');
         setShowBpmnEditor(false);

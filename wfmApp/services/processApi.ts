@@ -144,8 +144,8 @@ class ProcessApiService {
   }
 
   // Process Management
-  async createProcess(processData: ProcessCreate): Promise<ApiResponse<Process>> {
-    return this.request<Process>('/api/v1/enhanced-workflows/processes', {
+  async createProcess(processData: ProcessCreate, userId: string): Promise<ApiResponse<Process>> {
+    return this.request<Process>(`/api/v1/processes/?user_id=${userId}`, {
       method: 'POST',
       body: JSON.stringify(processData),
     });
@@ -157,7 +157,7 @@ class ProcessApiService {
     category?: string;
     status?: string;
     tenant_id?: string;
-  }): Promise<ApiResponse<{ processes: Process[]; total: number; skip: number; limit: number }>> {
+  }): Promise<ApiResponse<Process[]>> {
     const searchParams = new URLSearchParams();
     if (params?.skip) searchParams.append('skip', params.skip.toString());
     if (params?.limit) searchParams.append('limit', params.limit.toString());
@@ -166,24 +166,24 @@ class ProcessApiService {
     if (params?.tenant_id) searchParams.append('tenant_id', params.tenant_id);
 
     const queryString = searchParams.toString();
-    const endpoint = `/api/v1/enhanced-workflows/processes${queryString ? `?${queryString}` : ''}`;
+    const endpoint = `/api/v1/processes/${queryString ? `?${queryString}` : ''}`;
     
-    return this.request<{ processes: Process[]; total: number; skip: number; limit: number }>(endpoint);
+    return this.request<Process[]>(endpoint);
   }
 
   async getProcess(processId: string): Promise<ApiResponse<Process>> {
-    return this.request<Process>(`/api/v1/enhanced-workflows/processes/${processId}`);
+    return this.request<Process>(`/api/v1/processes/${processId}`);
   }
 
   async updateProcess(processId: string, processData: ProcessUpdate): Promise<ApiResponse<Process>> {
-    return this.request<Process>(`/api/v1/enhanced-workflows/processes/${processId}`, {
+    return this.request<Process>(`/api/v1/processes/${processId}`, {
       method: 'PUT',
       body: JSON.stringify(processData),
     });
   }
 
-  async deleteProcess(processId: string): Promise<ApiResponse<{ message: string }>> {
-    return this.request<{ message: string }>(`/api/v1/enhanced-workflows/processes/${processId}`, {
+  async deleteProcess(processId: string): Promise<ApiResponse<Process>> {
+    return this.request<Process>(`/api/v1/processes/${processId}`, {
       method: 'DELETE',
     });
   }
@@ -193,7 +193,7 @@ class ProcessApiService {
     processId: string,
     instanceData: ProcessInstanceCreate
   ): Promise<ApiResponse<ProcessInstance>> {
-    return this.request<ProcessInstance>(`/api/v1/enhanced-workflows/processes/${processId}/instances`, {
+    return this.request<ProcessInstance>(`/api/v1/processes/${processId}/instances`, {
       method: 'POST',
       body: JSON.stringify(instanceData),
     });
@@ -207,7 +207,7 @@ class ProcessApiService {
       status?: string;
       tenant_id?: string;
     }
-  ): Promise<ApiResponse<{ instances: ProcessInstance[]; total: number; skip: number; limit: number; process_id: string }>> {
+  ): Promise<ApiResponse<ProcessInstance[]>> {
     const searchParams = new URLSearchParams();
     if (params?.skip) searchParams.append('skip', params.skip.toString());
     if (params?.limit) searchParams.append('limit', params.limit.toString());
@@ -215,25 +215,43 @@ class ProcessApiService {
     if (params?.tenant_id) searchParams.append('tenant_id', params.tenant_id);
 
     const queryString = searchParams.toString();
-    const endpoint = `/api/v1/enhanced-workflows/processes/${processId}/instances${queryString ? `?${queryString}` : ''}`;
+    const endpoint = `/api/v1/processes/${processId}/instances${queryString ? `?${queryString}` : ''}`;
     
-    return this.request<{ instances: ProcessInstance[]; total: number; skip: number; limit: number; process_id: string }>(endpoint);
+    return this.request<ProcessInstance[]>(endpoint);
   }
 
   async getProcessInstance(instanceId: string): Promise<ApiResponse<ProcessInstance>> {
-    return this.request<ProcessInstance>(`/api/v1/enhanced-workflows/instances/${instanceId}`);
+    return this.request<ProcessInstance>(`/api/v1/processes/instances/${instanceId}`);
   }
 
   async executeProcessInstance(instanceId: string): Promise<ApiResponse<any>> {
-    return this.request<any>(`/api/v1/enhanced-workflows/instances/${instanceId}/execute`, {
+    return this.request<any>(`/api/v1/processes/instances/${instanceId}/execute`, {
       method: 'POST',
     });
   }
 
   async deleteProcessInstance(instanceId: string): Promise<ApiResponse<{ message: string }>> {
-    return this.request<{ message: string }>(`/api/v1/enhanced-workflows/instances/${instanceId}`, {
+    return this.request<{ message: string }>(`/api/v1/processes/instances/${instanceId}`, {
       method: 'DELETE',
     });
+  }
+
+  async listAllProcessInstances(params?: {
+    skip?: number;
+    limit?: number;
+    process_id?: string;
+    status?: string;
+  }): Promise<ApiResponse<ProcessInstance[]>> {
+    const searchParams = new URLSearchParams();
+    if (params?.skip) searchParams.append('skip', params.skip.toString());
+    if (params?.limit) searchParams.append('limit', params.limit.toString());
+    if (params?.process_id) searchParams.append('process_id', params.process_id);
+    if (params?.status) searchParams.append('status', params.status);
+
+    const queryString = searchParams.toString();
+    const endpoint = `/api/v1/processes/instances${queryString ? `?${queryString}` : ''}`;
+    
+    return this.request<ProcessInstance[]>(endpoint);
   }
 
   // Templates
@@ -241,7 +259,7 @@ class ProcessApiService {
     processId: string,
     templateData: Record<string, any>
   ): Promise<ApiResponse<Template>> {
-    return this.request<Template>(`/api/v1/enhanced-workflows/processes/${processId}/templates`, {
+    return this.request<Template>(`/api/v1/processes/${processId}/templates`, {
       method: 'POST',
       body: JSON.stringify(templateData),
     });
@@ -252,7 +270,7 @@ class ProcessApiService {
     limit?: number;
     category?: string;
     tenant_id?: string;
-  }): Promise<ApiResponse<{ templates: Template[]; total: number; skip: number; limit: number }>> {
+  }): Promise<ApiResponse<Template[]>> {
     const searchParams = new URLSearchParams();
     if (params?.skip) searchParams.append('skip', params.skip.toString());
     if (params?.limit) searchParams.append('limit', params.limit.toString());
@@ -260,14 +278,36 @@ class ProcessApiService {
     if (params?.tenant_id) searchParams.append('tenant_id', params.tenant_id);
 
     const queryString = searchParams.toString();
-    const endpoint = `/api/v1/enhanced-workflows/templates${queryString ? `?${queryString}` : ''}`;
+    const endpoint = `/api/v1/processes/templates${queryString ? `?${queryString}` : ''}`;
     
-    return this.request<{ templates: Template[]; total: number; skip: number; limit: number }>(endpoint);
+    return this.request<Template[]>(endpoint);
+  }
+
+  async createTemplate(templateData: Record<string, any>): Promise<ApiResponse<Template>> {
+    return this.request<Template>(`/api/v1/processes/templates`, {
+      method: 'POST',
+      body: JSON.stringify(templateData),
+    });
+  }
+
+  async getTemplate(templateId: string): Promise<ApiResponse<Template>> {
+    return this.request<Template>(`/api/v1/processes/templates/${templateId}`);
+  }
+
+  async updateTemplate(templateId: string, templateData: Record<string, any>): Promise<ApiResponse<Template>> {
+    return this.request<Template>(`/api/v1/processes/templates/${templateId}`, {
+      method: 'PUT',
+      body: JSON.stringify(templateData),
+    });
+  }
+
+  async deleteTemplate(templateId: string): Promise<ApiResponse<{ message: string }>> {
+    return this.request<{ message: string }>(`/api/v1/processes/templates/${templateId}`);
   }
 
   // BPMN Validation
   async validateBpmn(bpmnXml: string): Promise<ApiResponse<any>> {
-    return this.request<any>('/api/v1/enhanced-workflows/validate', {
+    return this.request<any>('/api/v1/workflows/validate', {
       method: 'POST',
       body: JSON.stringify({ bpmn_xml: bpmnXml }),
     });
@@ -279,7 +319,7 @@ class ProcessApiService {
     formData.append('file', file);
 
     try {
-      const url = `${this.baseUrl}/api/v1/enhanced-workflows/upload`;
+      const url = `${this.baseUrl}/api/v1/workflows/upload`;
       const response = await fetch(url, {
         method: 'POST',
         body: formData,

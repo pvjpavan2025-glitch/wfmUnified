@@ -168,7 +168,16 @@ class ProcessApiService {
     const queryString = searchParams.toString();
     const endpoint = `/api/v1/processes/${queryString ? `?${queryString}` : ''}`;
     
-    return this.request<Process[]>(endpoint);
+    const res = await this.request<Process[]>(endpoint);
+    // Normalize potential backend field mismatches (e.g., process_id)
+    if (res.data) {
+      res.data = res.data.map((p: any) => ({
+        // Preserve original fields first, then normalize id to a stable value
+        ...p,
+        id: p?.id ?? p?.process_id ?? p?.processId,
+      }));
+    }
+    return res;
   }
 
   async getProcess(processId: string): Promise<ApiResponse<Process>> {
@@ -208,14 +217,16 @@ class ProcessApiService {
       tenant_id?: string;
     }
   ): Promise<ApiResponse<ProcessInstance[]>> {
+    // Use the list-all endpoint with process_id filter to avoid 405 on nested route
     const searchParams = new URLSearchParams();
     if (params?.skip) searchParams.append('skip', params.skip.toString());
     if (params?.limit) searchParams.append('limit', params.limit.toString());
     if (params?.status) searchParams.append('status', params.status);
     if (params?.tenant_id) searchParams.append('tenant_id', params.tenant_id);
+    if (processId) searchParams.append('process_id', processId);
 
     const queryString = searchParams.toString();
-    const endpoint = `/api/v1/processes/${processId}/instances${queryString ? `?${queryString}` : ''}`;
+    const endpoint = `/api/v1/processes/instances${queryString ? `?${queryString}` : ''}`;
     
     return this.request<ProcessInstance[]>(endpoint);
   }

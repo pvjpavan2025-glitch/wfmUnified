@@ -1,6 +1,6 @@
 "use client"
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import dynamic from 'next/dynamic';
 import { AppShell } from '@/components/app-shell';
 import { 
@@ -40,8 +40,13 @@ export default function ModellingPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Load data when component mounts or tab changes
+  // Prevent duplicate fetches under React StrictMode by tracking last loaded tab
+  const lastLoadedTabRef = useRef<string | null>(null);
+
+  // Load data when tab changes (with dedupe)
   useEffect(() => {
+    if (lastLoadedTabRef.current === activeTab) return;
+    lastLoadedTabRef.current = activeTab;
     loadData();
   }, [activeTab]);
 
@@ -68,20 +73,10 @@ export default function ModellingPage() {
           
         case 'instances':
           try {
-            // For now, we'll load instances from all processes
-            const allInstances: ProcessInstance[] = [];
-            const processesForInstances = await processApiService.listProcesses();
-            if (processesForInstances.data) {
-              for (const process of processesForInstances.data) {
-                const instancesResponse = await processApiService.listProcessInstances(process.id);
-                if (instancesResponse.data) {
-                  allInstances.push(...instancesResponse.data);
-                }
-              }
-            }
-            setInstances(allInstances);
+            // Single call to list all instances; backend supports filtering via query if needed
+            const resp = await processApiService.listAllProcessInstances();
+            setInstances(resp.data ?? []);
           } catch (err) {
-            // If there's an error, just set empty instances instead of throwing
             setInstances([]);
             console.log('No instances found or error occurred:', err);
           }
@@ -345,8 +340,8 @@ export default function ModellingPage() {
                       </tr>
                     </thead>
                     <tbody className="bg-white divide-y divide-gray-200">
-                      {processes.map((process) => (
-                        <tr key={process.id}>
+                      {processes.map((process, idx) => (
+                        <tr key={process.id || process.process_id || `${process.name}-${idx}` }>
                           <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{process.name}</td>
                           <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{process.description}</td>
                           <td className="px-6 py-4 whitespace-nowrap">
@@ -411,8 +406,8 @@ export default function ModellingPage() {
                       </tr>
                     </thead>
                     <tbody className="bg-white divide-y divide-gray-200">
-                      {instances.map((instance) => (
-                        <tr key={instance.id}>
+                      {instances.map((instance, idx) => (
+                        <tr key={instance.id || `${instance.process_id}-${instance.started_at}-${idx}` }>
                                                      <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{instance.id}</td>
                           <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{instance.process_name}</td>
                           <td className="px-6 py-4 whitespace-nowrap">
@@ -442,10 +437,10 @@ export default function ModellingPage() {
               <div className="flex items-center justify-between mb-6">
                 <h3 className="text-lg font-medium text-gray-900">Templates</h3>
                 <button
-                  onClick={() => setActiveTab('manage-processes')}
+                  onClick={handleCreateNewProcess}
                   className="bg-blue-600 hover:bg-blue-700 text-white font-medium py-2 px-4 rounded"
                 >
-                  Create from Process
+                  Create New Template
                 </button>
               </div>
               
@@ -464,8 +459,8 @@ export default function ModellingPage() {
                 </div>
               ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                  {templates.map((template) => (
-                    <div key={template.id} className="border border-gray-200 rounded-lg p-4 hover:shadow-md transition-shadow">
+                  {templates.map((template, idx) => (
+                    <div key={template.id || `${template.name}-${idx}` } className="border border-gray-200 rounded-lg p-4 hover:shadow-md transition-shadow">
                       <div className="flex items-start justify-between">
                         <div className="flex-1">
                           <h4 className="text-sm font-medium text-gray-900 mb-1">{template.name}</h4>

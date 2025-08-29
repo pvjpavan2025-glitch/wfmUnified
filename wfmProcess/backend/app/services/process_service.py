@@ -18,7 +18,10 @@ class ProcessService:
     """Service for managing BPMN processes."""
     
     def __init__(self, db: Optional[AsyncIOMotorDatabase] = None):
-        self.db = db or get_mongodb_database()
+        if db is None:
+            self.db = get_mongodb_database()
+        else:
+            self.db = db
     
     async def create_process(self, process_data: ProcessCreate, user_id: str) -> Process:
         """Create a new process."""
@@ -250,7 +253,10 @@ class TemplateService:
     """Service for managing BPMN templates."""
     
     def __init__(self, db: Optional[AsyncIOMotorDatabase] = None):
-        self.db = db or get_mongodb_database()
+        if db is None:
+            self.db = get_mongodb_database()
+        else:
+            self.db = db
     
     async def create_template(self, template_data: TemplateCreate, user_id: str) -> Template:
         """Create a new template."""
@@ -421,6 +427,6 @@ class TemplateService:
             raise Exception(f"Failed to create template from process: {str(e)}")
 
 
-# Service instances
-process_service = ProcessService()
-template_service = TemplateService()
+# Service instances - will be created when needed
+# process_service = ProcessService()
+# template_service = TemplateService()

@@ -26,14 +26,14 @@ from ..core.mongodb import get_mongodb_database
 class EnhancedBpmnProcessor:
     """Enhanced BPMN processor with MongoDB integration for process management"""
     
-    def __init__(self):
+    def __init__(self, db=None):
         self.parser = BpmnParser()
         self.serializer = BpmnWorkflowSerializer()
         self.active_workflows: Dict[str, BpmnWorkflow] = {}
-        self.process_service = ProcessService()
+        self.process_service = ProcessService(db) if db else None
         self.logger = logging.getLogger(__name__)
     
-    async def parse_and_save_process(self, bpmn_xml: str, process_data: ProcessCreate) -> Process:
+    async def parse_and_save_process(self, bpmn_xml: str, process_data: ProcessCreate, db=None) -> Process:
         """Parse BPMN XML, validate it, and save to MongoDB"""
         try:
             # Validate BPMN XML
@@ -60,10 +60,14 @@ class EnhancedBpmnProcessor:
                 **process_info
             )
             
-            # Save to MongoDB
-            saved_process = await self.process_service.create_process(process_doc)
-            
-            return saved_process
+            # Save to MongoDB if service is available
+            if self.process_service or db:
+                process_service = self.process_service or ProcessService(db)
+                saved_process = await process_service.create_process(process_doc)
+                return saved_process
+            else:
+                # Return the process document without saving
+                return process_doc
             
         except Exception as e:
             raise WorkflowException(f"Failed to parse and save process: {str(e)}")
@@ -209,11 +213,15 @@ class EnhancedBpmnProcessor:
         
         return max(estimated_duration, 1)  # Minimum 1 minute
     
-    async def create_process_instance(self, process_id: str, input_data: Dict[str, Any] = None) -> ProcessInstance:
+    async def create_process_instance(self, process_id: str, input_data: Dict[str, Any] = None, db=None) -> ProcessInstance:
         """Create a new process instance from a saved process"""
         try:
             # Get the process from MongoDB
-            process = await self.process_service.get_process(process_id)
+            process_service = self.process_service or ProcessService(db)
+            if not process_service:
+                raise WorkflowException("No process service available")
+                
+            process = await process_service.get_process(process_id)
             if not process:
                 raise WorkflowException(f"Process {process_id} not found")
             
@@ -229,7 +237,7 @@ class EnhancedBpmnProcessor:
             )
             
             # Save to MongoDB
-            process_instance = await self.process_service.create_process_instance(instance_data)
+            process_instance = await process_service.create_process_instance(instance_data)
             
             # Create SpiffWorkflow instance for execution
             workflow_spec = self.parser.parse_string(process.bpmn_xml)
@@ -292,15 +300,16 @@ class EnhancedBpmnProcessor:
             # Update process instance status
             status = "completed" if workflow.is_completed() else "running"
             
-            # Update MongoDB
-            await self.process_service.update_process_instance(
-                instance_id,
-                {
-                    "status": status,
-                    "output_data": dict(workflow.data),
-                    "completed_at": datetime.utcnow() if status == "completed" else None
-                }
-            )
+            # Update MongoDB if service is available
+            if self.process_service:
+                await self.process_service.update_process_instance(
+                    instance_id,
+                    {
+                        "status": status,
+                        "output_data": dict(workflow.data),
+                        "completed_at": datetime.utcnow() if status == "completed" else None
+                    }
+                )
             
             return {
                 "instance_id": instance_id,
@@ -351,6 +360,9 @@ class EnhancedBpmnProcessor:
     async def _load_workflow_from_db(self, instance_id: str) -> Optional[BpmnWorkflow]:
         """Load workflow instance from MongoDB and recreate SpiffWorkflow"""
         try:
+            if not self.process_service:
+                return None
+                
             # Get process instance from MongoDB
             process_instance = await self.process_service.get_process_instance(instance_id)
             if not process_instance:
@@ -428,6 +440,9 @@ class EnhancedBpmnProcessor:
     async def get_process_instance_status(self, instance_id: str) -> Dict[str, Any]:
         """Get current process instance status"""
         try:
+            if not self.process_service:
+                raise WorkflowException("No process service available")
+                
             # Get from MongoDB
             process_instance = await self.process_service.get_process_instance(instance_id)
             if not process_instance:
@@ -459,6 +474,9 @@ class EnhancedBpmnProcessor:
                                    tenant_id: Optional[str] = None) -> List[ProcessInstance]:
         """List process instances with optional filtering"""
         try:
+            if not self.process_service:
+                raise WorkflowException("No process service available")
+                
             return await self.process_service.list_process_instances(
                 process_id=process_id,
                 status=status,
@@ -474,8 +492,11 @@ class EnhancedBpmnProcessor:
             if instance_id in self.active_workflows:
                 del self.active_workflows[instance_id]
             
-            # Delete from MongoDB
-            return await self.process_service.delete_process_instance(instance_id)
+            # Delete from MongoDB if service is available
+            if self.process_service:
+                return await self.process_service.delete_process_instance(instance_id)
+            else:
+                return True  # Just remove from memory
             
         except Exception as e:
             raise WorkflowException(f"Failed to delete process instance: {str(e)}")

@@ -11,8 +11,8 @@ mongodb_client: Optional[AsyncIOMotorClient] = None
 mongodb_database: Optional[AsyncIOMotorDatabase] = None
 
 
-async def connect_to_mongodb() -> None:
-    """Connect to MongoDB database."""
+async def init_mongodb() -> None:
+    """Initialize MongoDB connection."""
     global mongodb_client, mongodb_database
     
     try:
@@ -53,7 +53,7 @@ async def connect_to_mongodb() -> None:
         raise
 
 
-async def close_mongodb_connection() -> None:
+async def close_mongodb() -> None:
     """Close MongoDB connection."""
     global mongodb_client
     
@@ -64,7 +64,7 @@ async def close_mongodb_connection() -> None:
 
 async def _initialize_collections() -> None:
     """Initialize MongoDB collections with proper indexes."""
-    if not mongodb_database:
+    if mongodb_database is None:
         return
     
     try:
@@ -113,14 +113,14 @@ async def _initialize_collections() -> None:
 
 def get_mongodb_database() -> AsyncIOMotorDatabase:
     """Get MongoDB database instance."""
-    if not mongodb_database:
+    if mongodb_database is None:
         raise RuntimeError("MongoDB not connected. Call connect_to_mongodb() first.")
     return mongodb_database
 
 
 def get_mongodb_client() -> AsyncIOMotorClient:
     """Get MongoDB client instance."""
-    if not mongodb_client:
+    if mongodb_client is None:
         raise RuntimeError("MongoDB not connected. Call connect_to_mongodb() first.")
     return mongodb_client
 
@@ -128,7 +128,7 @@ def get_mongodb_client() -> AsyncIOMotorClient:
 async def health_check() -> dict:
     """Check MongoDB connection health."""
     try:
-        if not mongodb_client:
+        if mongodb_client is None:
             return {"status": "disconnected", "error": "Client not initialized"}
         
         # Test connection with ping

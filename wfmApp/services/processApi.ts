@@ -302,14 +302,4 @@ class ProcessApiService {
 // Export singleton instance
 export const processApiService = new ProcessApiService();
 
-// Export types
-export type {
-  Process,
-  ProcessCreate,
-  ProcessUpdate,
-  ProcessInstance,
-  ProcessInstanceCreate,
-  Template,
-  TemplateCreate,
-  ApiResponse,
-};
+// Types are already exported with export interface above

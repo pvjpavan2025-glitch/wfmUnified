@@ -6,22 +6,7 @@ from pydantic import BaseModel, Field
 from bson import ObjectId
 
 
-class PyObjectId(ObjectId):
-    """Custom ObjectId for Pydantic compatibility."""
-    
-    @classmethod
-    def __get_validators__(cls):
-        yield cls.validate
 
-    @classmethod
-    def validate(cls, v):
-        if not ObjectId.is_valid(v):
-            raise ValueError("Invalid ObjectId")
-        return ObjectId(v)
-
-    @classmethod
-    def __modify_schema__(cls, field_schema):
-        field_schema.update(type="string")
 
 
 class ProcessBase(BaseModel):
@@ -39,9 +24,12 @@ class ProcessCreate(ProcessBase):
     """Model for creating a new process."""
     
     bpmn_xml: str = Field(..., description="BPMN XML content")
-    process_id: str = Field(..., description="Unique BPMN process ID")
-    variables: Dict[str, Any] = Field(default_factory=dict)
+    version: str = Field(default="1.0.0", max_length=20)
+    category: Optional[str] = Field(None, max_length=100)
+    tags: List[str] = Field(default_factory=list)
     metadata: Dict[str, Any] = Field(default_factory=dict)
+    created_by: str = Field(..., max_length=100)
+    tenant_id: str = Field(..., max_length=100)
 
 
 class ProcessUpdate(BaseModel):
@@ -51,20 +39,18 @@ class ProcessUpdate(BaseModel):
     description: Optional[str] = Field(None, max_length=1000)
     category: Optional[str] = Field(None, max_length=100)
     tags: Optional[List[str]] = None
-    is_active: Optional[bool] = None
+    status: Optional[str] = None
     version: Optional[str] = Field(None, max_length=20)
     bpmn_xml: Optional[str] = None
-    variables: Optional[Dict[str, Any]] = None
     metadata: Optional[Dict[str, Any]] = None
 
 
 class Process(ProcessBase):
     """Complete process model."""
     
-    id: PyObjectId = Field(default_factory=PyObjectId, alias="_id")
+    id: str = Field(default_factory=lambda: str(ObjectId()), alias="_id")
     bpmn_xml: str = Field(..., description="BPMN XML content")
     process_id: str = Field(..., description="Unique BPMN process ID")
-    variables: Dict[str, Any] = Field(default_factory=dict)
     metadata: Dict[str, Any] = Field(default_factory=dict)
     
     # Execution info
@@ -77,11 +63,11 @@ class Process(ProcessBase):
     created_by: Optional[str] = Field(None, max_length=100)
     updated_by: Optional[str] = Field(None, max_length=100)
     
-    class Config:
-        allow_population_by_field_name = True
-        arbitrary_types_allowed = True
-        json_encoders = {ObjectId: str}
-        schema_extra = {
+    model_config = {
+        "populate_by_name": True,
+        "arbitrary_types_allowed": True,
+        "json_encoders": {ObjectId: str},
+        "json_schema_extra": {
             "example": {
                 "name": "Order Processing Workflow",
                 "description": "Automated order processing workflow",
@@ -94,6 +80,7 @@ class Process(ProcessBase):
                 "version": "1.0.0"
             }
         }
+    }
 
 
 class ProcessInstanceBase(BaseModel):
@@ -127,7 +114,7 @@ class ProcessInstanceUpdate(BaseModel):
 class ProcessInstance(ProcessInstanceBase):
     """Complete process instance model."""
     
-    id: PyObjectId = Field(default_factory=PyObjectId, alias="_id")
+    id: str = Field(default_factory=lambda: str(ObjectId()), alias="_id")
     instance_id: str = Field(..., description="Unique instance identifier")
     process_name: str = Field(..., description="Process name for reference")
     variables: Dict[str, Any] = Field(default_factory=dict)
@@ -151,11 +138,11 @@ class ProcessInstance(ProcessInstanceBase):
     started_by: Optional[str] = Field(None, max_length=100)
     completed_by: Optional[str] = Field(None, max_length=100)
     
-    class Config:
-        allow_population_by_field_name = True
-        arbitrary_types_allowed = True
-        json_encoders = {ObjectId: str}
-        schema_extra = {
+    model_config = {
+        "populate_by_name": True,
+        "arbitrary_types_allowed": True,
+        "json_encoders": {ObjectId: str},
+        "json_schema_extra": {
             "example": {
                 "process_id": "order_processing_001",
                 "process_name": "Order Processing Workflow",
@@ -165,6 +152,7 @@ class ProcessInstance(ProcessInstanceBase):
                 "priority": 1
             }
         }
+    }
 
 
 class TemplateBase(BaseModel):
@@ -183,7 +171,6 @@ class TemplateCreate(TemplateBase):
     
     bpmn_xml: str = Field(..., description="BPMN XML content")
     process_id: str = Field(..., description="Unique BPMN process ID")
-    variables: Dict[str, Any] = Field(default_factory=dict)
     metadata: Dict[str, Any] = Field(default_factory=dict)
     source_process_id: Optional[str] = Field(None, description="ID of process this template was created from")
 
@@ -198,17 +185,15 @@ class TemplateUpdate(BaseModel):
     is_public: Optional[bool] = None
     is_active: Optional[bool] = None
     bpmn_xml: Optional[str] = None
-    variables: Optional[Dict[str, Any]] = None
     metadata: Optional[Dict[str, Any]] = None
 
 
 class Template(TemplateBase):
     """Complete template model."""
     
-    id: PyObjectId = Field(default_factory=PyObjectId, alias="_id")
+    id: str = Field(default_factory=lambda: str(ObjectId()), alias="_id")
     bpmn_xml: str = Field(..., description="BPMN XML content")
     process_id: str = Field(..., description="Unique BPMN process ID")
-    variables: Dict[str, Any] = Field(default_factory=dict)
     metadata: Dict[str, Any] = Field(default_factory=dict)
     source_process_id: Optional[str] = Field(None, description="ID of process this template was created from")
     
@@ -222,11 +207,11 @@ class Template(TemplateBase):
     created_by: Optional[str] = Field(None, max_length=100)
     updated_by: Optional[str] = Field(None, max_length=100)
     
-    class Config:
-        allow_population_by_field_name = True
-        arbitrary_types_allowed = True
-        json_encoders = {ObjectId: str}
-        schema_extra = {
+    model_config = {
+        "populate_by_name": True,
+        "arbitrary_types_allowed": True,
+        "json_encoders": {ObjectId: str},
+        "json_schema_extra": {
             "example": {
                 "name": "Standard Order Processing",
                 "description": "Standard template for order processing workflows",
@@ -238,6 +223,7 @@ class Template(TemplateBase):
                 "is_active": True
             }
         }
+    }
 
 
 class ProcessSummary(BaseModel):
@@ -255,9 +241,10 @@ class ProcessSummary(BaseModel):
     updated_at: datetime
     created_by: Optional[str]
     
-    class Config:
-        allow_population_by_field_name = True
-        json_encoders = {ObjectId: str}
+    model_config = {
+        "populate_by_name": True,
+        "json_encoders": {ObjectId: str}
+    }
 
 
 class ProcessInstanceSummary(BaseModel):
@@ -272,9 +259,10 @@ class ProcessInstanceSummary(BaseModel):
     execution_time: Optional[float]
     started_by: Optional[str]
     
-    class Config:
-        allow_population_by_field_name = True
-        json_encoders = {ObjectId: str}
+    model_config = {
+        "populate_by_name": True,
+        "json_encoders": {ObjectId: str}
+    }
 
 
 class TemplateSummary(BaseModel):
@@ -290,6 +278,7 @@ class TemplateSummary(BaseModel):
     created_at: datetime
     created_by: Optional[str]
     
-    class Config:
-        allow_population_by_field_name = True
-        json_encoders = {ObjectId: str}
+    model_config = {
+        "populate_by_name": True,
+        "json_encoders": {ObjectId: str}
+    }

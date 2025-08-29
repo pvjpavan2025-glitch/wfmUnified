@@ -165,6 +165,7 @@ docker-compose up -d
 
 ### REmove only few images and rebuild
 - docker-compose stop wfmapp api-gateway order-service vendor-service
+- docker-compose down --remove-orphans
 - docker image rm wfmunified-wfmapp:latest wfmunified-api-gateway:latest wfmunified-order-service:latest wfmunified-vendor-service:latest
 - docker images | grep wfmunified
 - docker image rm wfmunified-wfmapp wfmunified-api-gateway wfmunified-order-service wfmunified-vendor-service

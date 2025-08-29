@@ -17,7 +17,7 @@ from .api.workflows import router as workflows_router
 from .api.enhanced_workflows import router as enhanced_workflows_router
 from .api.tasks import router as tasks_router
 from .api.executions import router as executions_router
-from .api.process_management import router as process_management_router
+from .api.processes import router as process_management_router
 
 
 # Configure logging
@@ -127,7 +127,7 @@ async def health_check():
         redis_healthy = await redis_client.ping()
         
         # Check MongoDB connection
-        from .core.mongodb import mongodb_health_check
+        from .core.mongodb import health_check as mongodb_health_check
         mongodb_healthy = await mongodb_health_check()
         
         return {

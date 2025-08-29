@@ -9,9 +9,8 @@ const nextConfig = {
       ? 'https://wfm-unified-apim.azure-api.net/process/v1' 
       : process.env.NEXT_PUBLIC_PROCESS_ENGINE_URL || 'http://localhost:8100'
   },
-  experimental: {
-    serverComponentsExternalPackages: ['bpmn-js']
-  }
+  // Next.js 15+: use top-level serverExternalPackages instead of deprecated experimental.serverComponentsExternalPackages
+  serverExternalPackages: ['bpmn-js']
 }
 
 module.exports = nextConfig

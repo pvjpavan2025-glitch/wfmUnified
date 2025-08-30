@@ -4,7 +4,7 @@ Vendor Service FastAPI application.
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, Depends, Query
 from typing import List, Optional
-from shared.auth import get_current_user
+from shared.auth import get_current_user, TokenData
 from shared.models import PaginationParams, SuccessResponse, ErrorResponse
 from shared.database import db_manager
 from .models import (
@@ -78,12 +78,13 @@ async def get_vendor(
 async def get_vendors(
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=1000),
-    current_user: dict = Depends(get_current_user),
+    current_user: TokenData = Depends(get_current_user),
     service: VendorService = Depends(get_vendor_service)
 ):
     """Get all vendors."""
     pagination = PaginationParams(skip=skip, limit=limit)
-    return await service.get_vendors(skip, limit)
+    tenant_id = current_user.tenant_id
+    return await service.get_vendors(tenant_id, pagination)
 
 
 @app.put("/vendors/{vendor_id}", response_model=VendorResponse)
@@ -292,4 +293,4 @@ async def unassign_task(
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8007)
+    uvicorn.run(app, host="0.0.0.0", port=8009)

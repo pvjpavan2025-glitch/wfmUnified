@@ -45,6 +45,11 @@ RUN pnpm install --prod
 COPY --from=base /app/.next ./.next
 COPY --from=base /app/public ./public
 COPY --from=base /app/next.config.mjs ./
+COPY --from=base /app/app ./app
+COPY --from=base /app/components ./components
+COPY --from=base /app/contexts ./contexts
+COPY --from=base /app/lib ./lib
+COPY --from=base /app/types ./types
 
 # Expose the port the app runs on
 EXPOSE 3000

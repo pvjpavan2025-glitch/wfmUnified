@@ -27,11 +27,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           try {
             const isValid = await authService.verifyToken();
             if (isValid) {
-              // Token is valid, but we need to get user info
-              // For now, we'll set authenticated to true
-              // In a real app, you might want to fetch user details here
+              // Token is valid, set a mock user for development
+              const mockUser: User = {
+                id: 'authenticated-user',
+                username: 'testuser',
+                email: 'test@wfm.local',
+                first_name: 'Test',
+                last_name: 'User',
+                roles: ['SuperAdmin']
+              };
+              setUser(mockUser);
               setIsLoading(false);
-              // You could fetch user details from a /me endpoint here
             } else {
               authService.logout();
               setIsLoading(false);

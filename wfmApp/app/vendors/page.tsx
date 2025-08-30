@@ -16,18 +16,175 @@ import { ProtectedRoute } from '../../components/protected-route';
 import AppShell from '@/components/app-shell';
 import HierarchicalVendorsTable from '@/components/vendors/hierarchical-vendors-table';
 import NestedVendorsTableView from '@/components/vendors/nested-vendors-table-view';
+import { vendorService, type Vendor } from '@/lib/vendor-service';
 
-interface Vendor {
-  id: string;
-  name: string;
-  contact_email: string;
-  contact_phone: string;
-  address: string;
-  status: string;
-  specializations: string[];
-  technician_count: number;
-  created_at: string;
-}
+// Add Vendor Dialog Component
+const AddVendorDialog = ({ 
+  onSubmit, 
+  loading, 
+  onCancel 
+}: { 
+  onSubmit: (data: any) => void; 
+  loading: boolean; 
+  onCancel: () => void; 
+}) => {
+  const [formData, setFormData] = useState({
+    name: '',
+    contact_email: '',
+    contact_phone: '',
+    address: '',
+    description: '',
+    capabilities: [] as string[]
+  });
+  const [capabilityInput, setCapabilityInput] = useState('');
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    onSubmit(formData);
+  };
+
+  const addCapability = () => {
+    if (capabilityInput.trim() && !formData.capabilities.includes(capabilityInput.trim())) {
+      setFormData({
+        ...formData,
+        capabilities: [...formData.capabilities, capabilityInput.trim()]
+      });
+      setCapabilityInput('');
+    }
+  };
+
+  const removeCapability = (capability: string) => {
+    setFormData({
+      ...formData,
+      capabilities: formData.capabilities.filter(c => c !== capability)
+    });
+  };
+
+  const handleKeyPress = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      addCapability();
+    }
+  };
+
+  return (
+    <DialogContent className="max-w-2xl">
+      <DialogHeader>
+        <DialogTitle>Add New Vendor</DialogTitle>
+        <DialogDescription>
+          Create a new vendor to manage their technicians and assignments
+        </DialogDescription>
+      </DialogHeader>
+      
+      <form onSubmit={handleSubmit} className="space-y-4">
+        <div className="grid grid-cols-2 gap-4">
+          <div className="space-y-2">
+            <Label htmlFor="name">Company Name *</Label>
+            <Input
+              id="name"
+              value={formData.name}
+              onChange={(e) => setFormData({...formData, name: e.target.value})}
+              placeholder="Enter company name"
+              required
+            />
+          </div>
+          
+          <div className="space-y-2">
+            <Label htmlFor="contact_email">Contact Email *</Label>
+            <Input
+              id="contact_email"
+              type="email"
+              value={formData.contact_email}
+              onChange={(e) => setFormData({...formData, contact_email: e.target.value})}
+              placeholder="contact@company.com"
+              required
+            />
+          </div>
+        </div>
+
+        <div className="grid grid-cols-2 gap-4">
+          <div className="space-y-2">
+            <Label htmlFor="contact_phone">Contact Phone *</Label>
+            <Input
+              id="contact_phone"
+              value={formData.contact_phone}
+              onChange={(e) => setFormData({...formData, contact_phone: e.target.value})}
+              placeholder="+1-555-0123"
+              required
+            />
+          </div>
+          
+          <div className="space-y-2">
+            <Label htmlFor="address">Address *</Label>
+            <Input
+              id="address"
+              value={formData.address}
+              onChange={(e) => setFormData({...formData, address: e.target.value})}
+              placeholder="123 Main St, City, State"
+              required
+            />
+          </div>
+        </div>
+
+        <div className="space-y-2">
+          <Label htmlFor="description">Description</Label>
+          <Textarea
+            id="description"
+            value={formData.description}
+            onChange={(e) => setFormData({...formData, description: e.target.value})}
+            placeholder="Brief description of the vendor's services..."
+            rows={3}
+          />
+        </div>
+
+        <div className="space-y-2">
+          <Label>Capabilities</Label>
+          <div className="flex gap-2">
+            <Input
+              value={capabilityInput}
+              onChange={(e) => setCapabilityInput(e.target.value)}
+              onKeyPress={handleKeyPress}
+              placeholder="Enter capability (e.g., fiber_installation)"
+            />
+            <Button type="button" onClick={addCapability} variant="outline">
+              Add
+            </Button>
+          </div>
+          <div className="flex flex-wrap gap-2 mt-2">
+            {formData.capabilities.map((capability) => (
+              <Badge key={capability} variant="secondary" className="cursor-pointer">
+                {capability}
+                <button
+                  type="button"
+                  onClick={() => removeCapability(capability)}
+                  className="ml-2 hover:text-red-500"
+                >
+                  ×
+                </button>
+              </Badge>
+            ))}
+          </div>
+        </div>
+
+        <div className="flex justify-end gap-2 pt-4">
+          <Button type="button" variant="outline" onClick={onCancel} disabled={loading}>
+            Cancel
+          </Button>
+          <Button type="submit" disabled={loading}>
+            {loading ? (
+              <>
+                <RefreshCw className="mr-2 h-4 w-4 animate-spin" />
+                Creating...
+              </>
+            ) : (
+              'Create Vendor'
+            )}
+          </Button>
+        </div>
+      </form>
+    </DialogContent>
+  );
+};
 
 interface Technician {
   id: string;
@@ -63,44 +220,46 @@ const VendorsPage = () => {
   const [leads, setLeads] = useState<Lead[]>([]);
   const [selectedVendor, setSelectedVendor] = useState<Vendor | null>(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState('vendors');
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [viewMode, setViewMode] = useState('hierarchical');
+  const [isAddVendorOpen, setIsAddVendorOpen] = useState(false);
+  const [addVendorLoading, setAddVendorLoading] = useState(false);
 
   useEffect(() => {
     fetchData();
   }, []);
 
+  // Refetch data when filters change
+  useEffect(() => {
+    if (!loading) {
+      const timeoutId = setTimeout(() => {
+        fetchData();
+      }, 500); // Debounce search
+      return () => clearTimeout(timeoutId);
+    }
+  }, [searchTerm, statusFilter]);
+
   const fetchData = async () => {
     try {
       setLoading(true);
-      // Mock data for now - replace with actual API calls
-      const mockVendors: Vendor[] = [
-        {
-          id: 'vendor-001',
-          name: 'TechCorp Solutions',
-          contact_email: 'contact@techcorp.com',
-          contact_phone: '+1-555-0101',
-          address: '123 Tech Street, San Francisco, CA',
-          status: 'active',
-          specializations: ['fiber_installation', 'network_maintenance'],
-          technician_count: 15,
-          created_at: '2024-01-01T00:00:00Z'
-        },
-        {
-          id: 'vendor-002',
-          name: 'Field Services Inc',
-          contact_email: 'info@fieldservices.com',
-          contact_phone: '+1-555-0102',
-          address: '456 Service Ave, Austin, TX',
-          status: 'active',
-          specializations: ['cable_installation', 'equipment_repair'],
-          technician_count: 8,
-          created_at: '2024-01-02T00:00:00Z'
-        }
-      ];
-
+      setError(null);
+      
+      // Fetch vendors from the API
+      const vendorsData = await vendorService.getVendors({
+        page: 1,
+        limit: 100, // Get all vendors for now
+        status: statusFilter === 'all' ? undefined : statusFilter,
+        search: searchTerm || undefined
+      });
+      
+      console.log('Fetched vendors:', vendorsData);
+      setVendors(vendorsData);
+      
+      // TODO: Implement technicians and leads APIs
+      // For now, keep mock data for technicians and leads
       const mockTechnicians: Technician[] = [
         {
           id: 'tech-001',
@@ -185,13 +344,43 @@ const VendorsPage = () => {
         }
       ];
 
-      setVendors(mockVendors);
       setTechnicians(mockTechnicians);
       setLeads(mockLeads);
     } catch (error) {
       console.error('Failed to fetch data:', error);
+      setError(`Failed to fetch vendor data: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      // On error, fall back to empty data
+      setVendors([]);
+      setTechnicians([]);
+      setLeads([]);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleAddVendor = async (vendorData: {
+    name: string;
+    contact_email: string;
+    contact_phone: string;
+    address: string;
+    description?: string;
+    capabilities: string[];
+  }) => {
+    try {
+      setAddVendorLoading(true);
+      await vendorService.createVendor({
+        ...vendorData,
+        tenant_id: 'default', // Use default tenant for now
+      });
+      
+      // Close dialog and refresh data
+      setIsAddVendorOpen(false);
+      await fetchData();
+    } catch (error) {
+      console.error('Failed to create vendor:', error);
+      setError(`Failed to create vendor: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    } finally {
+      setAddVendorLoading(false);
     }
   };
 
@@ -213,14 +402,14 @@ const VendorsPage = () => {
     }
   };
 
-  const filteredVendors = vendors.filter(vendor => {
+  const filteredVendors = vendors.filter((vendor: Vendor) => {
     const matchesSearch = vendor.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
                          vendor.contact_email.toLowerCase().includes(searchTerm.toLowerCase());
     const matchesStatus = statusFilter === 'all' || vendor.status === statusFilter;
     return matchesSearch && matchesStatus;
   });
 
-  const filteredTechnicians = technicians.filter(tech => {
+  const filteredTechnicians = technicians.filter((tech: Technician) => {
     const matchesSearch = tech.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
                          tech.email.toLowerCase().includes(searchTerm.toLowerCase()) ||
                          tech.vendor_name.toLowerCase().includes(searchTerm.toLowerCase());
@@ -228,7 +417,7 @@ const VendorsPage = () => {
     return matchesSearch && matchesStatus;
   });
 
-  const filteredLeads = leads.filter(lead => {
+  const filteredLeads = leads.filter((lead: Lead) => {
     const matchesSearch = lead.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
                          lead.email.toLowerCase().includes(searchTerm.toLowerCase()) ||
                          lead.vendor_name.toLowerCase().includes(searchTerm.toLowerCase());
@@ -240,7 +429,7 @@ const VendorsPage = () => {
   const totalVendors = filteredVendors.length;
   const totalLeads = filteredLeads.length;
   const totalTechnicians = filteredTechnicians.length;
-  const activeTechnicians = filteredTechnicians.filter(t => t.availability_status === 'available').length;
+  const activeTechnicians = filteredTechnicians.filter((t: Technician) => t.availability_status === 'available').length;
 
   return (
     <ProtectedRoute>
@@ -256,10 +445,19 @@ const VendorsPage = () => {
                 <RefreshCw className="mr-2 h-4 w-4" />
                 Refresh
               </Button>
-              <Button>
-                <Plus className="mr-2 h-4 w-4" />
-                Add Vendor
-              </Button>
+              <Dialog open={isAddVendorOpen} onOpenChange={setIsAddVendorOpen}>
+                <DialogTrigger asChild>
+                  <Button>
+                    <Plus className="mr-2 h-4 w-4" />
+                    Add Vendor
+                  </Button>
+                </DialogTrigger>
+                <AddVendorDialog 
+                  onSubmit={handleAddVendor} 
+                  loading={addVendorLoading}
+                  onCancel={() => setIsAddVendorOpen(false)}
+                />
+              </Dialog>
             </div>
           </div>
 
@@ -286,6 +484,22 @@ const VendorsPage = () => {
               </div>
             </CardContent>
           </Card>
+
+          {/* Error Display */}
+          {error && (
+            <Card>
+              <CardContent className="py-4">
+                <div className="flex items-center gap-2 text-red-600">
+                  <RefreshCw className="h-4 w-4" />
+                  <span className="font-medium">Error:</span>
+                  <span>{error}</span>
+                  <Button variant="outline" size="sm" onClick={fetchData}>
+                    Retry
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+          )}
 
           {/* Filters & View Options */}
           <Card>
@@ -427,7 +641,7 @@ const VendorsPage = () => {
                         </TableCell>
                         <TableCell>
                           <div className="flex flex-wrap gap-1">
-                            {vendor.specializations.map((spec) => (
+                            {(vendor.specializations || vendor.capabilities || []).map((spec: string) => (
                               <Badge key={spec} variant="outline" className="text-xs">
                                 {spec.replace('_', ' ')}
                               </Badge>
@@ -481,7 +695,7 @@ const VendorsPage = () => {
                                     <div>
                                       <h4 className="font-semibold">Specializations</h4>
                                       <div className="flex gap-2 mt-2">
-                                        {selectedVendor.specializations.map((spec) => (
+                                        {(selectedVendor.specializations || selectedVendor.capabilities || []).map((spec: string) => (
                                           <Badge key={spec} variant="outline">
                                             {spec.replace('_', ' ')}
                                           </Badge>

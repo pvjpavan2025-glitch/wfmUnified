@@ -68,6 +68,17 @@ class TokenManager:
     
     def verify_token(self, token: str) -> TokenData:
         """Verify and decode a token."""
+        # In development mode, accept mock tokens
+        if settings.service.environment == "development" and token.startswith("mock-jwt-token-for-development"):
+            logger.info("Accepting mock token for development")
+            return TokenData(
+                user_id="mock-user-id",
+                username="testuser",
+                tenant_id="default",
+                roles=["Admin", "SuperAdmin"],
+                exp=datetime.utcnow() + timedelta(hours=1)
+            )
+        
         try:
             payload = jwt.decode(token, self.secret_key, algorithms=[self.algorithm])
             token_type = payload.get("type")

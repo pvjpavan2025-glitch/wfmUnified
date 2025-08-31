@@ -95,7 +95,7 @@ async def update_vendor(
     service: VendorService = Depends(get_vendor_service)
 ):
     """Update vendor."""
-    vendor = await service.update_vendor(vendor_id, update_data)
+    vendor = await service.update_vendor(vendor_id, current_user.tenant_id, update_data)
     if not vendor:
         raise HTTPException(status_code=404, detail="Vendor not found")
     return vendor

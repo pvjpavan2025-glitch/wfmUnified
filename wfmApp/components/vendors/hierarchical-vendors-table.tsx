@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
 import { ChevronDown, ChevronRight, Building2, Users, UserPlus, Eye, Edit, Phone, Mail, MapPin } from 'lucide-react';
+import { Vendor } from '@/lib/vendor-service';
 
 interface Technician {
   id: string;
@@ -35,26 +36,13 @@ interface Lead {
   created_at: string;
 }
 
-interface Vendor {
-  id: string;
-  name: string;
-  contact_email: string;
-  contact_phone: string;
-  address: string;
-  status: string;
-  specializations: string[];
-  technician_count: number;
-  created_at: string;
-  leads?: Lead[];
-  technicians?: Technician[];
-}
-
 interface HierarchicalVendorsTableProps {
   vendors: Vendor[];
   leads: Lead[];
   technicians: Technician[];
   searchTerm: string;
   statusFilter: string;
+  onEditVendor?: (vendor: Vendor) => void;
 }
 
 const HierarchicalVendorsTable: React.FC<HierarchicalVendorsTableProps> = ({
@@ -62,7 +50,8 @@ const HierarchicalVendorsTable: React.FC<HierarchicalVendorsTableProps> = ({
   leads,
   technicians,
   searchTerm,
-  statusFilter
+  statusFilter,
+  onEditVendor
 }) => {
   const [expandedVendors, setExpandedVendors] = useState<Set<string>>(new Set());
   const [expandedLeads, setExpandedLeads] = useState<Set<string>>(new Set());
@@ -200,7 +189,11 @@ const HierarchicalVendorsTable: React.FC<HierarchicalVendorsTableProps> = ({
                         <Button variant="outline" size="sm">
                           <Eye className="h-3 w-3" />
                         </Button>
-                        <Button variant="outline" size="sm">
+                        <Button 
+                          variant="outline" 
+                          size="sm"
+                          onClick={() => onEditVendor?.(vendor)}
+                        >
                           <Edit className="h-3 w-3" />
                         </Button>
                       </div>

@@ -84,11 +84,8 @@ class AuthService {
           iat: Math.floor(Date.now() / 1000)
         };
         
-        // For development, create a simple base64 encoded token that backend can decode
-        // In production, this should use proper JWT signing
-        const mockToken = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.' + 
-                         btoa(JSON.stringify(mockPayload)) + 
-                         '.mock-signature-for-development';
+        // For development, create a mock token that matches the backend expectation
+        const mockToken = 'mock-jwt-token-for-development-' + credentials.username;
         
         const mockResponse: AuthResponse = {
           access_token: mockToken,

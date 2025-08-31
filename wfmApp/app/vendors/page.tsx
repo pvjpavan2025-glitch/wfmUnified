@@ -17,6 +17,178 @@ import AppShell from '@/components/app-shell';
 import HierarchicalVendorsTable from '@/components/vendors/hierarchical-vendors-table';
 import NestedVendorsTableView from '@/components/vendors/nested-vendors-table-view';
 import { vendorService, type Vendor } from '@/lib/vendor-service';
+import { useAuth } from '@/contexts/auth-context';
+import { useToast } from '@/hooks/use-toast';
+
+// Edit Vendor Dialog Component
+const EditVendorDialog = ({ 
+  vendor,
+  onSubmit, 
+  loading, 
+  onCancel 
+}: { 
+  vendor: Vendor;
+  onSubmit: (data: any) => void; 
+  loading: boolean; 
+  onCancel: () => void; 
+}) => {
+  const [formData, setFormData] = useState({
+    name: vendor.name,
+    contact_email: vendor.contact_email,
+    contact_phone: vendor.contact_phone,
+    address: vendor.address,
+    description: vendor.description || '',
+    capabilities: vendor.capabilities || vendor.specializations || []
+  });
+  const [capabilityInput, setCapabilityInput] = useState('');
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    onSubmit(formData);
+  };
+
+  const addCapability = () => {
+    if (capabilityInput.trim() && !formData.capabilities.includes(capabilityInput.trim())) {
+      setFormData({
+        ...formData,
+        capabilities: [...formData.capabilities, capabilityInput.trim()]
+      });
+      setCapabilityInput('');
+    }
+  };
+
+  const removeCapability = (capability: string) => {
+    setFormData({
+      ...formData,
+      capabilities: formData.capabilities.filter(c => c !== capability)
+    });
+  };
+
+  const handleKeyPress = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      addCapability();
+    }
+  };
+
+  return (
+    <DialogContent className="max-w-2xl">
+      <DialogHeader>
+        <DialogTitle>Edit Vendor</DialogTitle>
+        <DialogDescription>
+          Update vendor information and capabilities
+        </DialogDescription>
+      </DialogHeader>
+      
+      <form onSubmit={handleSubmit} className="space-y-4">
+        <div className="grid grid-cols-2 gap-4">
+          <div className="space-y-2">
+            <Label htmlFor="edit-name">Company Name *</Label>
+            <Input
+              id="edit-name"
+              value={formData.name}
+              onChange={(e) => setFormData({...formData, name: e.target.value})}
+              placeholder="Enter company name"
+              required
+            />
+          </div>
+          
+          <div className="space-y-2">
+            <Label htmlFor="edit-contact_email">Contact Email *</Label>
+            <Input
+              id="edit-contact_email"
+              type="email"
+              value={formData.contact_email}
+              onChange={(e) => setFormData({...formData, contact_email: e.target.value})}
+              placeholder="contact@company.com"
+              required
+            />
+          </div>
+        </div>
+
+        <div className="grid grid-cols-2 gap-4">
+          <div className="space-y-2">
+            <Label htmlFor="edit-contact_phone">Contact Phone *</Label>
+            <Input
+              id="edit-contact_phone"
+              value={formData.contact_phone}
+              onChange={(e) => setFormData({...formData, contact_phone: e.target.value})}
+              placeholder="+1-555-0123"
+              required
+            />
+          </div>
+          
+          <div className="space-y-2">
+            <Label htmlFor="edit-address">Address *</Label>
+            <Input
+              id="edit-address"
+              value={formData.address}
+              onChange={(e) => setFormData({...formData, address: e.target.value})}
+              placeholder="123 Main St, City, State"
+              required
+            />
+          </div>
+        </div>
+
+        <div className="space-y-2">
+          <Label htmlFor="edit-description">Description</Label>
+          <Textarea
+            id="edit-description"
+            value={formData.description}
+            onChange={(e) => setFormData({...formData, description: e.target.value})}
+            placeholder="Brief description of the vendor's services..."
+            rows={3}
+          />
+        </div>
+
+        <div className="space-y-2">
+          <Label>Capabilities</Label>
+          <div className="flex gap-2">
+            <Input
+              value={capabilityInput}
+              onChange={(e) => setCapabilityInput(e.target.value)}
+              onKeyPress={handleKeyPress}
+              placeholder="Enter capability (e.g., fiber_installation)"
+            />
+            <Button type="button" onClick={addCapability} variant="outline">
+              Add
+            </Button>
+          </div>
+          <div className="flex flex-wrap gap-2 mt-2">
+            {formData.capabilities.map((capability) => (
+              <Badge key={capability} variant="secondary" className="cursor-pointer">
+                {capability}
+                <button
+                  type="button"
+                  onClick={() => removeCapability(capability)}
+                  className="ml-2 hover:text-red-500"
+                >
+                  ×
+                </button>
+              </Badge>
+            ))}
+          </div>
+        </div>
+
+        <div className="flex justify-end gap-2 pt-4">
+          <Button type="button" variant="outline" onClick={onCancel} disabled={loading}>
+            Cancel
+          </Button>
+          <Button type="submit" disabled={loading}>
+            {loading ? (
+              <>
+                <RefreshCw className="mr-2 h-4 w-4 animate-spin" />
+                Updating...
+              </>
+            ) : (
+              'Update Vendor'
+            )}
+          </Button>
+        </div>
+      </form>
+    </DialogContent>
+  );
+};
 
 // Add Vendor Dialog Component
 const AddVendorDialog = ({ 
@@ -215,6 +387,7 @@ interface Lead {
 }
 
 const VendorsPage = () => {
+  const { user, isLoading: authLoading } = useAuth();
   const [vendors, setVendors] = useState<Vendor[]>([]);
   const [technicians, setTechnicians] = useState<Technician[]>([]);
   const [leads, setLeads] = useState<Lead[]>([]);
@@ -227,25 +400,41 @@ const VendorsPage = () => {
   const [viewMode, setViewMode] = useState('hierarchical');
   const [isAddVendorOpen, setIsAddVendorOpen] = useState(false);
   const [addVendorLoading, setAddVendorLoading] = useState(false);
+  const [isEditVendorOpen, setIsEditVendorOpen] = useState(false);
+  const [editVendorLoading, setEditVendorLoading] = useState(false);
+  const [vendorToEdit, setVendorToEdit] = useState<Vendor | null>(null);
+  const { toast } = useToast();
 
   useEffect(() => {
-    fetchData();
-  }, []);
+    // Only fetch data if user is authenticated and not loading
+    if (user && !authLoading) {
+      fetchData();
+    }
+  }, [user, authLoading]);
 
-  // Refetch data when filters change
+  // Refetch data when filters change - but only after initial load and if authenticated
   useEffect(() => {
-    if (!loading) {
+    if (!loading && user && !authLoading) {
       const timeoutId = setTimeout(() => {
         fetchData();
       }, 500); // Debounce search
       return () => clearTimeout(timeoutId);
     }
-  }, [searchTerm, statusFilter]);
+  }, [searchTerm, statusFilter, user, authLoading]);
 
   const fetchData = async () => {
     try {
       setLoading(true);
       setError(null);
+      
+      // Check if user is authenticated before making API calls
+      if (!user) {
+        setError('User not authenticated. Please log in to view vendors.');
+        setVendors([]);
+        setTechnicians([]);
+        setLeads([]);
+        return;
+      }
       
       // Fetch vendors from the API
       const vendorsData = await vendorService.getVendors({
@@ -348,7 +537,17 @@ const VendorsPage = () => {
       setLeads(mockLeads);
     } catch (error) {
       console.error('Failed to fetch data:', error);
-      setError(`Failed to fetch vendor data: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      
+      // Check for authentication errors
+      if (errorMessage.includes('401') || errorMessage.includes('Unauthorized')) {
+        setError('Authentication failed. Please log in again to view vendors.');
+      } else if (errorMessage.includes('403') || errorMessage.includes('Forbidden')) {
+        setError('Access denied. You do not have permission to view vendors.');
+      } else {
+        setError(`Failed to fetch vendor data: ${errorMessage}`);
+      }
+      
       // On error, fall back to empty data
       setVendors([]);
       setTechnicians([]);
@@ -382,6 +581,75 @@ const VendorsPage = () => {
     } finally {
       setAddVendorLoading(false);
     }
+  };
+
+  const handleEditVendor = async (vendorData: {
+    name: string;
+    contact_email: string;
+    contact_phone: string;
+    address: string;
+    description?: string;
+    capabilities: string[];
+  }) => {
+    if (!vendorToEdit) {
+      console.error('No vendor selected for editing');
+      return;
+    }
+    
+    try {
+      setEditVendorLoading(true);
+      setError(null); // Clear any previous errors
+      
+      console.log('handleEditVendor called');
+      console.log('vendorToEdit:', vendorToEdit);
+      console.log('vendorToEdit.id:', vendorToEdit.id);
+      console.log('vendorToEdit._id:', vendorToEdit._id);
+      console.log('vendorToEdit keys:', Object.keys(vendorToEdit));
+      
+      const vendorId = vendorToEdit.id || vendorToEdit._id;
+      console.log('Using vendor ID:', vendorId);
+      
+      if (!vendorId) {
+        throw new Error('Vendor ID is missing');
+      }
+      
+      const updatedVendor = await vendorService.updateVendor(vendorId, {
+        ...vendorData,
+        tenant_id: vendorToEdit.tenant_id,
+      });
+      
+      console.log('Vendor updated successfully:', updatedVendor);
+      
+      // Close dialog and refresh data
+      setIsEditVendorOpen(false);
+      setVendorToEdit(null);
+      await fetchData();
+    } catch (error) {
+      console.error('Failed to update vendor:', error);
+      setError(`Failed to update vendor: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    } finally {
+      setEditVendorLoading(false);
+    }
+  };
+
+  const openEditDialog = (vendor: Vendor) => {
+    console.log('openEditDialog called with vendor:', vendor);
+    console.log('vendor.id:', vendor.id);
+    console.log('vendor._id:', vendor._id);
+    console.log('vendor keys:', Object.keys(vendor));
+    
+    // Check if this vendor has a temporary ID (cannot be edited)
+    if (vendor.id.startsWith('temp_')) {
+      toast({
+        title: "Cannot Edit Vendor",
+        description: "This vendor has corrupted data and cannot be edited. Please contact support.",
+        variant: "destructive",
+      });
+      return;
+    }
+    
+    setVendorToEdit(vendor);
+    setIsEditVendorOpen(true);
   };
 
   const getStatusBadgeVariant = (status: string) => {
@@ -441,9 +709,9 @@ const VendorsPage = () => {
               <p className="text-muted-foreground">Manage vendors, technicians, and team leads</p>
             </div>
             <div className="flex gap-2">
-              <Button onClick={() => fetchData()}>
-                <RefreshCw className="mr-2 h-4 w-4" />
-                Refresh
+              <Button onClick={() => fetchData()} disabled={loading}>
+                <RefreshCw className={`mr-2 h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
+                {loading ? 'Refreshing...' : 'Refresh'}
               </Button>
               <Dialog open={isAddVendorOpen} onOpenChange={setIsAddVendorOpen}>
                 <DialogTrigger asChild>
@@ -457,6 +725,21 @@ const VendorsPage = () => {
                   loading={addVendorLoading}
                   onCancel={() => setIsAddVendorOpen(false)}
                 />
+              </Dialog>
+              
+              {/* Edit Vendor Dialog */}
+              <Dialog open={isEditVendorOpen} onOpenChange={setIsEditVendorOpen}>
+                {vendorToEdit && (
+                  <EditVendorDialog 
+                    vendor={vendorToEdit}
+                    onSubmit={handleEditVendor} 
+                    loading={editVendorLoading}
+                    onCancel={() => {
+                      setIsEditVendorOpen(false);
+                      setVendorToEdit(null);
+                    }}
+                  />
+                )}
               </Dialog>
             </div>
           </div>
@@ -564,6 +847,7 @@ const VendorsPage = () => {
               technicians={filteredTechnicians}
               searchTerm={searchTerm}
               statusFilter={statusFilter}
+              onEditVendor={openEditDialog}
             />
           ) : (
             <Card>
@@ -578,6 +862,7 @@ const VendorsPage = () => {
                   technicians={filteredTechnicians}
                   searchTerm={searchTerm}
                   statusFilter={statusFilter}
+                  onEditVendor={openEditDialog}
                 />
               </CardContent>
             </Card>
@@ -706,7 +991,11 @@ const VendorsPage = () => {
                                 )}
                               </DialogContent>
                             </Dialog>
-                            <Button variant="outline" size="sm">
+                            <Button 
+                              variant="outline" 
+                              size="sm"
+                              onClick={() => openEditDialog(vendor)}
+                            >
                               <Edit className="h-4 w-4" />
                             </Button>
                           </div>

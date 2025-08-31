@@ -30,9 +30,10 @@ export default function LoginClient() {
     }
   }
 
-  const floatDelayA = useMemo(() => Math.random() * 2, [])
-  const floatDelayB = useMemo(() => Math.random() * 2, [])
-  const floatDelayC = useMemo(() => Math.random() * 2, [])
+  // Fixed animation delays to prevent hydration mismatch
+  const floatDelayA = useMemo(() => 0.5, [])
+  const floatDelayB = useMemo(() => 1.2, [])
+  const floatDelayC = useMemo(() => 0.8, [])
 
   // Parallax drift (very gentle)
   const [px, setPx] = useState(0)

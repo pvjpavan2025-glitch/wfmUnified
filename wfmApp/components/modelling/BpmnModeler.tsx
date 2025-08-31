@@ -30,6 +30,9 @@ const BpmnModelerComponent: React.FC<BpmnModelerProps> = ({ onSave, onClose }) =
   const [selectedElement, setSelectedElement] = useState<any>(null);
   const [executionStatus, setExecutionStatus] = useState<string>('');
   const [showTransactionBoundaries, setShowTransactionBoundaries] = useState<boolean>(false);
+  const [showImportDialog, setShowImportDialog] = useState<boolean>(false);
+  const [importUrl, setImportUrl] = useState<string>('');
+  const [isImporting, setIsImporting] = useState<boolean>(false);
 
   useEffect(() => {
     if (!containerRef.current || !propertiesPanelRef.current) return;
@@ -62,10 +65,28 @@ const BpmnModelerComponent: React.FC<BpmnModelerProps> = ({ onSave, onClose }) =
         // Wait for the modeler to be ready
         await new Promise(resolve => setTimeout(resolve, 500));
 
-        // Create a simple BPMN diagram if the method exists
-        if (typeof newModeler.createDiagram === 'function') {
-          await newModeler.createDiagram();
-        }
+        // Create an empty BPMN diagram by importing default XML
+        const defaultBpmnXml = `<?xml version="1.0" encoding="UTF-8"?>
+<bpmn:definitions xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+                  xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                  xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI"
+                  xmlns:dc="http://www.omg.org/spec/DD/20100524/DC"
+                  targetNamespace="http://bpmn.io/schema/bpmn"
+                  id="Definitions_1">
+  <bpmn:process id="Process_1" isExecutable="false">
+    <bpmn:startEvent id="StartEvent_1" />
+  </bpmn:process>
+  <bpmndi:BPMNDiagram id="BPMNDiagram_1">
+    <bpmndi:BPMNPlane id="BPMNPlane_1" bpmnElement="Process_1">
+      <bpmndi:BPMNShape id="_BPMNShape_StartEvent_2" bpmnElement="StartEvent_1">
+        <dc:Bounds x="173" y="102" width="36" height="36" />
+      </bpmndi:BPMNShape>
+    </bpmndi:BPMNPlane>
+  </bpmndi:BPMNDiagram>
+</bpmn:definitions>`;
+
+        // Import the default BPMN XML to create an empty diagram
+        await (newModeler as any).importXML(defaultBpmnXml);
         
         // Set up event listeners
         const eventBus = newModeler.get('eventBus') as any;
@@ -86,6 +107,18 @@ const BpmnModelerComponent: React.FC<BpmnModelerProps> = ({ onSave, onClose }) =
         setError('');
 
         setModeler(newModeler);
+
+        // Check for URL parameter for auto-import
+        const urlParams = new URLSearchParams(window.location.search);
+        const autoImportUrl = urlParams.get('url');
+        if (autoImportUrl && newModeler) {
+          setImportUrl(decodeURIComponent(autoImportUrl));
+          // Auto-import after modeler is ready
+          setTimeout(() => {
+            handleAutoImport(decodeURIComponent(autoImportUrl), newModeler);
+          }, 1000);
+        }
+
       } catch (err) {
         console.error('Error initializing BPMN modeler:', err);
         setError('Failed to initialize BPMN modeler');
@@ -185,8 +218,36 @@ const BpmnModelerComponent: React.FC<BpmnModelerProps> = ({ onSave, onClose }) =
       try {
         setIsLoading(true);
         setError('');
-        await modeler.createDiagram();
-        const { xml: newXml } = await modeler.saveXML({ format: true });
+        
+        // Create an empty BPMN diagram by importing default XML
+        const defaultBpmnXml = `<?xml version="1.0" encoding="UTF-8"?>
+<bpmn:definitions xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+                  xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                  xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI"
+                  xmlns:dc="http://www.omg.org/spec/DD/20100524/DC"
+                  targetNamespace="http://bpmn.io/schema/bpmn"
+                  id="Definitions_1">
+  <bpmn:process id="Process_1" isExecutable="false">
+    <bpmn:startEvent id="StartEvent_1" />
+  </bpmn:process>
+  <bpmndi:BPMNDiagram id="BPMNDiagram_1">
+    <bpmndi:BPMNPlane id="BPMNPlane_1" bpmnElement="Process_1">
+      <bpmndi:BPMNShape id="_BPMNShape_StartEvent_2" bpmnElement="StartEvent_1">
+        <dc:Bounds x="173" y="102" width="36" height="36" />
+      </bpmndi:BPMNShape>
+    </bpmndi:BPMNPlane>
+  </bpmndi:BPMNDiagram>
+</bpmn:definitions>`;
+
+        await (modeler as any).importXML(defaultBpmnXml);
+        
+        // Zoom to fit the viewport
+        const canvas = (modeler as any).get('canvas');
+        if (canvas && typeof canvas.zoom === 'function') {
+          canvas.zoom('fit-viewport');
+        }
+        
+        const { xml: newXml } = await (modeler as any).saveXML({ format: true });
         setXml(newXml || '');
         console.log('New diagram created');
       } catch (err) {
@@ -256,6 +317,166 @@ const BpmnModelerComponent: React.FC<BpmnModelerProps> = ({ onSave, onClose }) =
     }
   };
 
+  const handleImport = () => {
+    setShowImportDialog(true);
+    setImportUrl('');
+  };
+
+  const handleImportCancel = () => {
+    setShowImportDialog(false);
+    setImportUrl('');
+  };
+
+    const handleImportFromUrl = async () => {
+    if (!importUrl.trim()) {
+      setError('Please enter a valid URL');
+      return;
+    }
+
+    setIsImporting(true);
+    setError('');
+
+    try {
+      console.log('Attempting to import from URL:', importUrl);
+      
+      let xmlContent = '';
+      
+      // Try direct fetch first (for same-origin or CORS-enabled URLs)
+      try {
+        console.log('Trying direct fetch...');
+        const response = await fetch(importUrl, {
+          method: 'GET',
+          headers: {
+            'Accept': 'application/xml, text/xml, text/plain, */*',
+          },
+          mode: 'cors',
+        });
+
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        }
+
+        xmlContent = await response.text();
+        console.log('Direct fetch successful');
+        
+      } catch (directFetchError) {
+        console.log('Direct fetch failed, trying proxy approach:', directFetchError);
+        
+        // Use our proxy API for CORS-blocked URLs
+        try {
+          const proxyUrl = `/api/proxy-bpmn?url=${encodeURIComponent(importUrl)}`;
+          console.log('Using proxy URL:', proxyUrl);
+          
+          const proxyResponse = await fetch(proxyUrl, {
+            method: 'GET',
+            headers: {
+              'Accept': 'application/xml, text/xml, text/plain, */*',
+            },
+          });
+
+          if (!proxyResponse.ok) {
+            const errorData = await proxyResponse.json().catch(() => ({ error: 'Unknown proxy error' }));
+            throw new Error(`Proxy error: ${errorData.error || proxyResponse.statusText}`);
+          }
+
+          xmlContent = await proxyResponse.text();
+          console.log('Proxy fetch successful');
+          
+        } catch (proxyError) {
+          console.error('Proxy fetch also failed:', proxyError);
+          throw new Error(`Unable to fetch BPMN file. ${proxyError instanceof Error ? proxyError.message : 'Please check the URL and ensure the server allows cross-origin requests.'}`);
+        }
+      }
+      
+      if (!xmlContent || xmlContent.trim().length === 0) {
+        throw new Error('The URL returned empty content');
+      }
+
+      // Validate that it looks like XML
+      if (!xmlContent.trim().startsWith('<?xml') && !xmlContent.trim().startsWith('<')) {
+        throw new Error('The URL did not return valid XML content');
+      }
+
+      console.log('Successfully fetched XML content, length:', xmlContent.length);
+
+      // Import the XML into the modeler
+      if (modeler) {
+        await (modeler as any).importXML(xmlContent);
+        console.log('BPMN XML imported successfully');
+        
+        // Close the dialog on success
+        setShowImportDialog(false);
+        setImportUrl('');
+      } else {
+        throw new Error('BPMN Modeler not initialized');
+      }
+
+    } catch (error) {
+      console.error('Error importing BPMN from URL:', error);
+      setError(error instanceof Error ? error.message : 'Unknown error occurred');
+    } finally {
+      setIsImporting(false);
+    }
+  };
+
+  const handleAutoImport = async (url: string, modelerInstance: BpmnModeler) => {
+    if (!url.trim() || !modelerInstance) return;
+
+    console.log('Auto-importing BPMN from URL:', url);
+    
+    try {
+      // Validate URL format
+      const validUrl = new URL(url.trim());
+      
+      // Fetch the BPMN XML from the URL with better CORS handling
+      const response = await fetch(validUrl.toString(), {
+        method: 'GET',
+        mode: 'cors',
+        headers: {
+          'Accept': 'application/xml, text/xml, text/plain, */*',
+          'Content-Type': 'application/xml',
+        },
+        credentials: 'omit',
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status} - ${response.statusText}`);
+      }
+
+      const xmlData = await response.text();
+      
+      if (!xmlData || xmlData.trim().length === 0) {
+        throw new Error('Empty response from URL');
+      }
+
+      // Validate that the response looks like XML
+      if (!xmlData.trim().startsWith('<?xml') && !xmlData.trim().startsWith('<')) {
+        throw new Error('Response does not appear to be valid XML content');
+      }
+
+      console.log('Auto-import: BPMN XML fetched successfully, importing...');
+      
+      // Import the XML into the modeler
+      await (modelerInstance as any).importXML(xmlData);
+      
+      // Zoom to fit the viewport
+      const canvas = (modelerInstance as any).get('canvas');
+      if (canvas && typeof canvas.zoom === 'function') {
+        canvas.zoom('fit-viewport');
+      }
+      
+      // Save the XML to state
+      const { xml: importedXml } = await (modelerInstance as any).saveXML({ format: true });
+      setXml(importedXml || '');
+      
+      console.log('Auto-import: BPMN imported successfully');
+      
+    } catch (error) {
+      console.error('Error auto-importing BPMN from URL:', error);
+      // Don't show alert for auto-import failures, just log
+    }
+  };
+
   return (
     <div className="h-full flex flex-col">
       {/* Header */}
@@ -293,6 +514,13 @@ const BpmnModelerComponent: React.FC<BpmnModelerProps> = ({ onSave, onClose }) =
             disabled={isLoading}
           >
             {showTransactionBoundaries ? 'Hide' : 'Show'} Boundaries
+          </button>
+          <button
+            onClick={handleImport}
+            className="bg-cyan-600 hover:bg-cyan-700 text-white px-4 py-2 rounded text-sm font-medium"
+            disabled={isLoading}
+          >
+            Import
           </button>
           <button
             onClick={handleDownload}
@@ -478,6 +706,55 @@ const BpmnModelerComponent: React.FC<BpmnModelerProps> = ({ onSave, onClose }) =
           </div>
         </div>
       </div>
+
+      {/* Import Dialog */}
+      {showImportDialog && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg shadow-xl max-w-md w-full mx-4">
+            <div className="p-6">
+              <h3 className="text-lg font-medium text-gray-900 mb-4">
+                Import BPMN from URL
+              </h3>
+              <div className="mb-4">
+                <label htmlFor="import-url" className="block text-sm font-medium text-gray-700 mb-2">
+                  BPMN File URL
+                </label>
+                <input
+                  id="import-url"
+                  type="url"
+                  value={importUrl}
+                  onChange={(e) => setImportUrl(e.target.value)}
+                  placeholder="https://example.com/diagram.bpmn"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                  disabled={isImporting}
+                />
+                <p className="mt-1 text-xs text-gray-500">
+                  Enter the URL of a BPMN file (.bpmn or .xml) to import. Note: The server must allow cross-origin requests (CORS) for this to work.
+                </p>
+                <p className="mt-1 text-xs text-blue-600">
+                  💡 Tip: Try this sample URL: https://cdn.staticaly.com/gh/bpmn-io/bpmn-js-examples/master/starter/diagram.bpmn
+                </p>
+              </div>
+              <div className="flex justify-end space-x-3">
+                <button
+                  onClick={handleImportCancel}
+                  className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
+                  disabled={isImporting}
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleImportFromUrl}
+                  className="px-4 py-2 text-sm font-medium text-white bg-blue-600 border border-transparent rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                  disabled={isImporting || !importUrl.trim()}
+                >
+                  {isImporting ? 'Importing...' : 'Import'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

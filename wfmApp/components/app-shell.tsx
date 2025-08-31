@@ -62,7 +62,8 @@ export function AppShell({ title, subtitle, children }: { title: string; subtitl
                   const Icon = item.icon
                   return (
                     <SidebarMenuItem key={item.href}>
-                      <Link href={item.href} className="block">
+                      {/* Disable prefetch to avoid background RSC fetches for all sidebar routes */}
+                      <Link href={item.href} prefetch={false} className="block">
                         <SidebarMenuButton
                           isActive={!!active}
                           className={cn(

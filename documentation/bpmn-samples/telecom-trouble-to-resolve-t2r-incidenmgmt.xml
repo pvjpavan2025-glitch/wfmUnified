@@ -1,0 +1,80 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                  xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI"
+                  xmlns:dc="http://www.omg.org/spec/DD/20100524/DC"
+                  xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+                  xmlns:zeebe="http://camunda.org/schema/zeebe/1.0"
+                  id="TroubleToResolveDefinitions"
+                  targetNamespace="http://telecom.example.com/bpmn">
+
+  <bpmn:process id="TroubleToResolveProcess" name="Trouble to Resolve Process" isExecutable="true">
+
+    <!-- Start Event -->
+    <bpmn:startEvent id="StartEvent" name="Trouble Ticket Logged"/>
+
+    <!-- User Task: Log Trouble Ticket -->
+    <bpmn:userTask id="LogTroubleTicket" name="Log Trouble Ticket"/>
+
+    <!-- Service Task: Automatic Network Diagnosis -->
+    <bpmn:serviceTask id="NetworkDiagnosis" name="Automatic Network Diagnosis">
+      <bpmn:extensionElements>
+        <zeebe:taskDefinition type="network-diagnosis" retries="2"/>
+      </bpmn:extensionElements>
+    </bpmn:serviceTask>
+
+    <!-- Script Task: Prioritize Issue (JavaScript) -->
+    <bpmn:scriptTask id="PrioritizeIssueJS" name="Prioritize Issue" scriptFormat="javascript">
+      <bpmn:script>
+var severity = execution.getVariable("severity");
+var priority = (severity > 5) ? "High" : "Normal";
+execution.setVariable("priority", priority);
+      </bpmn:script>
+    </bpmn:scriptTask>
+
+    <!-- Send Task: Notify Field Engineer -->
+    <bpmn:sendTask id="NotifyEngineer" name="Notify Field Engineer"/>
+
+    <!-- Receive Task: Receive Engineer Report -->
+    <bpmn:receiveTask id="ReceiveEngineerReport" name="Receive Engineer Report"/>
+
+    <!-- Manual Task: Follow-up Inspection -->
+    <bpmn:manualTask id="FollowUpInspection" name="Perform Follow-up Inspection"/>
+
+    <!-- Business Rule Task: Apply SLA Rules -->
+    <bpmn:businessRuleTask id="ApplySLARules" name="Apply SLA Rules"/>
+
+    <!-- Call Activity: Raise Change Request or Network Repair -->
+    <bpmn:callActivity id="RaiseChangeRequest" name="Raise Change Request" calledElement="NetworkRepairSubProcess"/>
+
+    <!-- End Event -->
+    <bpmn:endEvent id="EndEvent" name="Trouble Resolved"/>
+
+    <!-- Sequence Flows -->
+    <bpmn:sequenceFlow id="flow1" sourceRef="StartEvent" targetRef="LogTroubleTicket"/>
+    <bpmn:sequenceFlow id="flow2" sourceRef="LogTroubleTicket" targetRef="NetworkDiagnosis"/>
+    <bpmn:sequenceFlow id="flow3" sourceRef="NetworkDiagnosis" targetRef="PrioritizeIssueJS"/>
+    <bpmn:sequenceFlow id="flow4" sourceRef="PrioritizeIssueJS" targetRef="NotifyEngineer"/>
+    <bpmn:sequenceFlow id="flow5" sourceRef="NotifyEngineer" targetRef="ReceiveEngineerReport"/>
+    <bpmn:sequenceFlow id="flow6" sourceRef="ReceiveEngineerReport" targetRef="FollowUpInspection"/>
+    <bpmn:sequenceFlow id="flow7" sourceRef="FollowUpInspection" targetRef="ApplySLARules"/>
+    <bpmn:sequenceFlow id="flow8" sourceRef="ApplySLARules" targetRef="RaiseChangeRequest"/>
+    <bpmn:sequenceFlow id="flow9" sourceRef="RaiseChangeRequest" targetRef="EndEvent"/>
+
+  </bpmn:process>
+
+  <!-- Called Process: Network Repair SubProcess -->
+  <bpmn:process id="NetworkRepairSubProcess" name="Network Repair SubProcess" isExecutable="true">
+    <bpmn:startEvent id="RepairStart"/>
+    <bpmn:userTask id="PlanRepairTask" name="Plan Repair"/>
+    <bpmn:serviceTask id="ExecuteRepair" name="Execute Repair">
+      <bpmn:extensionElements>
+        <zeebe:taskDefinition type="repair-service" retries="2"/>
+      </bpmn:extensionElements>
+    </bpmn:serviceTask>
+    <bpmn:endEvent id="RepairEnd"/>
+    <bpmn:sequenceFlow id="repairFlow1" sourceRef="RepairStart" targetRef="PlanRepairTask"/>
+    <bpmn:sequenceFlow id="repairFlow2" sourceRef="PlanRepairTask" targetRef="ExecuteRepair"/>
+    <bpmn:sequenceFlow id="repairFlow3" sourceRef="ExecuteRepair" targetRef="RepairEnd"/>
+  </bpmn:process>
+
+</bpmn:definitions>

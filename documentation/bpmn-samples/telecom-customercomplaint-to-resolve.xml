@@ -1,0 +1,82 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                  xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI"
+                  xmlns:dc="http://www.omg.org/spec/DD/20100524/DC"
+                  xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+                  xmlns:zeebe="http://camunda.org/schema/zeebe/1.0"
+                  id="CustomerComplaintDefinitions"
+                  targetNamespace="http://telecom.example.com/bpmn">
+
+  <bpmn:process id="CustomerComplaintProcess" name="Customer Complaint to Solution Process" isExecutable="true">
+
+    <!-- Start Event -->
+    <bpmn:startEvent id="StartEvent" name="Complaint Logged"/>
+
+    <!-- User Task: Log Complaint -->
+    <bpmn:userTask id="LogComplaint" name="Log Customer Complaint"/>
+
+    <!-- Script Task: Triage Urgency -->
+    <bpmn:scriptTask id="TriageUrgency" name="Triage Urgency Level" scriptFormat="javascript">
+      <bpmn:script>
+var urgency = execution.getVariable("complaintUrgency");
+var route = (urgency === "high") ? "Priority Handling" : "Standard Handling";
+execution.setVariable("routingPath", route);
+      </bpmn:script>
+    </bpmn:scriptTask>
+
+    <!-- Sub-process: Investigate Complaint -->
+    <bpmn:subProcess id="InvestigateComplaintSubProcess" name="Investigate Complaint">
+      <bpmn:startEvent id="InvestigateStart"/>
+      <bpmn:userTask id="ConductInterviews" name="Conduct User Interviews"/>
+      <bpmn:manualTask id="ManualCheck" name="Manual Data Check"/>
+      <bpmn:endEvent id="InvestigateEnd"/>
+      <bpmn:sequenceFlow id="invFlow1" sourceRef="InvestigateStart" targetRef="ConductInterviews"/>
+      <bpmn:sequenceFlow id="invFlow2" sourceRef="ConductInterviews" targetRef="ManualCheck"/>
+      <bpmn:sequenceFlow id="invFlow3" sourceRef="ManualCheck" targetRef="InvestigateEnd"/>
+    </bpmn:subProcess>
+
+    <!-- Service Task: Update Systems -->
+    <bpmn:serviceTask id="UpdateSystems" name="Update Customer Systems">
+      <bpmn:extensionElements>
+        <zeebe:taskDefinition type="update-systems" retries="3"/>
+      </bpmn:extensionElements>
+    </bpmn:serviceTask>
+
+    <!-- Business Rule Task: Determine Compensation -->
+    <bpmn:businessRuleTask id="DetermineCompensation" name="Determine Compensation Eligibility"/>
+
+    <!-- Send Task: Notify Customer with Resolution -->
+    <bpmn:sendTask id="NotifyCustomerResolution" name="Notify Customer of Resolution"/>
+
+    <!-- Receive Task: Receive Customer Confirmation -->
+    <bpmn:receiveTask id="ReceiveCustomerConfirmation" name="Receive Customer Confirmation"/>
+
+    <!-- Call Activity: Escalate or Close Complaint -->
+    <bpmn:callActivity id="EscalateOrClose" name="Escalate or Close Complaint" calledElement="ComplaintEscalationSubProcess"/>
+
+    <!-- End Event -->
+    <bpmn:endEvent id="EndEvent" name="Complaint Resolved"/>
+
+    <!-- Sequence Flows -->
+    <bpmn:sequenceFlow id="flow1" sourceRef="StartEvent" targetRef="LogComplaint"/>
+    <bpmn:sequenceFlow id="flow2" sourceRef="LogComplaint" targetRef="TriageUrgency"/>
+    <bpmn:sequenceFlow id="flow3" sourceRef="TriageUrgency" targetRef="InvestigateComplaintSubProcess"/>
+    <bpmn:sequenceFlow id="flow4" sourceRef="InvestigateComplaintSubProcess" targetRef="UpdateSystems"/>
+    <bpmn:sequenceFlow id="flow5" sourceRef="UpdateSystems" targetRef="DetermineCompensation"/>
+    <bpmn:sequenceFlow id="flow6" sourceRef="DetermineCompensation" targetRef="NotifyCustomerResolution"/>
+    <bpmn:sequenceFlow id="flow7" sourceRef="NotifyCustomerResolution" targetRef="ReceiveCustomerConfirmation"/>
+    <bpmn:sequenceFlow id="flow8" sourceRef="ReceiveCustomerConfirmation" targetRef="EscalateOrClose"/>
+    <bpmn:sequenceFlow id="flow9" sourceRef="EscalateOrClose" targetRef="EndEvent"/>
+
+  </bpmn:process>
+
+  <!-- Called Process: Complaint Escalation or Closure SubProcess -->
+  <bpmn:process id="ComplaintEscalationSubProcess" name="Complaint Escalation or Closure" isExecutable="true">
+    <bpmn:startEvent id="EscalationStart"/>
+    <bpmn:userTask id="ReviewEscalatedComplaint" name="Review Escalated Complaint"/>
+    <bpmn:endEvent id="EscalationEnd"/>
+    <bpmn:sequenceFlow id="escFlow1" sourceRef="EscalationStart" targetRef="ReviewEscalatedComplaint"/>
+    <bpmn:sequenceFlow id="escFlow2" sourceRef="ReviewEscalatedComplaint" targetRef="EscalationEnd"/>
+  </bpmn:process>
+
+</bpmn:definitions>

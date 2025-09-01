@@ -1,0 +1,128 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<bpmn:definitions xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+                  xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                  xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI"
+                  xmlns:dc="http://www.omg.org/spec/DD/20100524/DC"
+                  xmlns:di="http://www.omg.org/spec/DD/20100524/DI"
+                  id="Definitions_OrderActivate"
+                  targetNamespace="http://bpmn.io/schema/bpmn"
+                  exporter="bpmn-js (https://demo.bpmn.io)"
+                  exporterVersion="18.6.1">
+
+  <bpmn:process id="Process_OrderActivate" isExecutable="false">
+    <bpmn:startEvent id="StartEvent_Request">
+      <bpmn:outgoing>Flow_Request_Validate</bpmn:outgoing>
+    </bpmn:startEvent>
+    <bpmn:userTask id="Task_Validate" name="Validate Customer">
+      <bpmn:incoming>Flow_Request_Validate</bpmn:incoming>
+      <bpmn:outgoing>Flow_Validate_Eligibility</bpmn:outgoing>
+    </bpmn:userTask>
+    <bpmn:sequenceFlow id="Flow_Request_Validate" sourceRef="StartEvent_Request" targetRef="Task_Validate" />
+    <bpmn:businessRuleTask id="Task_CheckEligibility" name="Eligibility Check">
+      <bpmn:incoming>Flow_Validate_Eligibility</bpmn:incoming>
+      <bpmn:outgoing>Flow_Eligibility_Provision</bpmn:outgoing>
+    </bpmn:businessRuleTask>
+    <bpmn:sequenceFlow id="Flow_Validate_Eligibility" sourceRef="Task_Validate" targetRef="Task_CheckEligibility" />
+    <bpmn:serviceTask id="Task_ProvisionService" name="Provision Service">
+      <bpmn:incoming>Flow_Eligibility_Provision</bpmn:incoming>
+      <bpmn:outgoing>Flow_Provision_Notify</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:sequenceFlow id="Flow_Eligibility_Provision" sourceRef="Task_CheckEligibility" targetRef="Task_ProvisionService" />
+    <bpmn:sendTask id="Task_NotifyCustomer" name="Notify Customer">
+      <bpmn:incoming>Flow_Provision_Notify</bpmn:incoming>
+      <bpmn:outgoing>Flow_Notify_Ack</bpmn:outgoing>
+    </bpmn:sendTask>
+    <bpmn:sequenceFlow id="Flow_Provision_Notify" sourceRef="Task_ProvisionService" targetRef="Task_NotifyCustomer" />
+    <bpmn:receiveTask id="Task_WaitAck" name="Wait for Customer Ack">
+      <bpmn:incoming>Flow_Notify_Ack</bpmn:incoming>
+      <bpmn:outgoing>Flow_Ack_Activate</bpmn:outgoing>
+    </bpmn:receiveTask>
+    <bpmn:sequenceFlow id="Flow_Notify_Ack" sourceRef="Task_NotifyCustomer" targetRef="Task_WaitAck" />
+    <bpmn:callActivity id="Task_ActivateSIM" name="Activate SIM" calledElement="Process_SIMActivation">
+      <bpmn:incoming>Flow_Ack_Activate</bpmn:incoming>
+      <bpmn:outgoing>Flow_Activate_End</bpmn:outgoing>
+    </bpmn:callActivity>
+    <bpmn:sequenceFlow id="Flow_Ack_Activate" sourceRef="Task_WaitAck" targetRef="Task_ActivateSIM" />
+    <bpmn:endEvent id="EndEvent_Activated">
+      <bpmn:incoming>Flow_Activate_End</bpmn:incoming>
+    </bpmn:endEvent>
+    <bpmn:sequenceFlow id="Flow_Activate_End" sourceRef="Task_ActivateSIM" targetRef="EndEvent_Activated" />
+  </bpmn:process>
+
+  <bpmn:process id="Process_SIMActivation" isExecutable="false">
+    <bpmn:startEvent id="StartEvent_SIM">
+      <bpmn:outgoing>Flow_SIM_Check</bpmn:outgoing>
+    </bpmn:startEvent>
+    <bpmn:userTask id="Task_CheckDocs" name="Check Activation Docs">
+      <bpmn:incoming>Flow_SIM_Check</bpmn:incoming>
+      <bpmn:outgoing>Flow_SIM_Activate</bpmn:outgoing>
+    </bpmn:userTask>
+    <bpmn:sequenceFlow id="Flow_SIM_Check" sourceRef="StartEvent_SIM" targetRef="Task_CheckDocs" />
+    <bpmn:serviceTask id="Task_ActivateSIMService" name="Activate SIM in Network">
+      <bpmn:incoming>Flow_SIM_Activate</bpmn:incoming>
+      <bpmn:outgoing>Flow_SIM_End</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:sequenceFlow id="Flow_SIM_Activate" sourceRef="Task_CheckDocs" targetRef="Task_ActivateSIMService" />
+    <bpmn:endEvent id="EndEvent_SIMActivated">
+      <bpmn:incoming>Flow_SIM_End</bpmn:incoming>
+    </bpmn:endEvent>
+    <bpmn:sequenceFlow id="Flow_SIM_End" sourceRef="Task_ActivateSIMService" targetRef="EndEvent_SIMActivated" />
+  </bpmn:process>
+
+  <bpmndi:BPMNDiagram id="Diagram_OrderActivate">
+    <bpmndi:BPMNPlane id="Plane_OrderActivate" bpmnElement="Process_OrderActivate">
+      <bpmndi:BPMNShape id="Shape_StartEvent" bpmnElement="StartEvent_Request">
+        <dc:Bounds x="100" y="100" width="36" height="36"/>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_TaskValidate" bpmnElement="Task_Validate">
+        <dc:Bounds x="180" y="87" width="100" height="60"/>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_TaskEligibility" bpmnElement="Task_CheckEligibility">
+        <dc:Bounds x="320" y="87" width="100" height="60"/>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_TaskProvision" bpmnElement="Task_ProvisionService">
+        <dc:Bounds x="460" y="87" width="100" height="60"/>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_TaskNotify" bpmnElement="Task_NotifyCustomer">
+        <dc:Bounds x="600" y="87" width="100" height="60"/>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_TaskWaitAck" bpmnElement="Task_WaitAck">
+        <dc:Bounds x="740" y="87" width="100" height="60"/>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_TaskActivateSIM" bpmnElement="Task_ActivateSIM">
+        <dc:Bounds x="880" y="87" width="100" height="60"/>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_EndEvent_Activated" bpmnElement="EndEvent_Activated">
+        <dc:Bounds x="1020" y="100" width="36" height="36"/>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNEdge id="Edge_Flow_Request_Validate" bpmnElement="Flow_Request_Validate">
+        <di:waypoint x="136" y="118" />
+        <di:waypoint x="180" y="117" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Flow_Validate_Eligibility" bpmnElement="Flow_Validate_Eligibility">
+        <di:waypoint x="280" y="117" />
+        <di:waypoint x="320" y="117" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Flow_Eligibility_Provision" bpmnElement="Flow_Eligibility_Provision">
+        <di:waypoint x="420" y="117" />
+        <di:waypoint x="460" y="117" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Flow_Provision_Notify" bpmnElement="Flow_Provision_Notify">
+        <di:waypoint x="560" y="117" />
+        <di:waypoint x="600" y="117" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Flow_Notify_Ack" bpmnElement="Flow_Notify_Ack">
+        <di:waypoint x="700" y="117" />
+        <di:waypoint x="740" y="117" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Flow_Ack_Activate" bpmnElement="Flow_Ack_Activate">
+        <di:waypoint x="840" y="117" />
+        <di:waypoint x="880" y="117" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Flow_Activate_End" bpmnElement="Flow_Activate_End">
+        <di:waypoint x="980" y="117" />
+        <di:waypoint x="1020" y="118" />
+      </bpmndi:BPMNEdge>
+    </bpmndi:BPMNPlane>
+  </bpmndi:BPMNDiagram>
+</bpmn:definitions>

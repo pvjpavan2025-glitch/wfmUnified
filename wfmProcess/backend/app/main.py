@@ -18,6 +18,7 @@ from .api.enhanced_workflows import router as enhanced_workflows_router
 from .api.tasks import router as tasks_router
 from .api.executions import router as executions_router
 from .api.processes import router as process_management_router
+from .api.bpmn_temp_storage import router as bpmn_temp_storage_router
 
 
 # Configure logging
@@ -106,6 +107,7 @@ app.include_router(enhanced_workflows_router, prefix=f"{settings.api_prefix}/enh
 app.include_router(tasks_router, prefix=f"{settings.api_prefix}/tasks", tags=["tasks"])
 app.include_router(executions_router, prefix=f"{settings.api_prefix}/executions", tags=["executions"])
 app.include_router(process_management_router, prefix=f"{settings.api_prefix}/processes", tags=["processes"])
+app.include_router(bpmn_temp_storage_router, prefix=f"{settings.api_prefix}/bpmn-temp", tags=["bpmn-temp-storage"])
 
 
 @app.get("/")

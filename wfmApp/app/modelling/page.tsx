@@ -188,7 +188,7 @@ export default function ModellingPage() {
 
   if (showBpmnEditor) {
     return (
-      <AppShell title="BPMN Editor" subtitle="Create or edit BPMN process">
+      <AppShell title="FSM Process Designer" subtitle="Create or edit business process">
         <div className="bg-white shadow rounded-lg p-6">
           <div className="flex items-center justify-between mb-6">
             <h2 className="text-lg font-medium text-gray-900">
@@ -204,6 +204,7 @@ export default function ModellingPage() {
           <BpmnModelerComponent
             onSave={handleSaveProcess}
             onClose={() => setShowBpmnEditor(false)}
+            autoCreateDiagram={!selectedTemplate} // Auto-create for new processes, not for templates
           />
         </div>
       </AppShell>
@@ -211,7 +212,7 @@ export default function ModellingPage() {
   }
 
   return (
-    <AppShell title="Modelling" subtitle="BPMN Process Management">
+    <AppShell title="Process Modelling" subtitle="FSM Business Process Management">
       <div className="flex h-full">
         {/* Side Menu */}
         <div className="w-64 bg-gray-50 border-r border-gray-200 p-4">
@@ -278,10 +279,10 @@ export default function ModellingPage() {
                   </svg>
                 </div>
                 <h3 className="text-lg font-medium text-gray-900 mb-2">
-                  Create New BPMN Process
+                  Create New FSM Process
                 </h3>
                 <p className="text-gray-500 mb-6">
-                  Start building your process by creating a new BPMN diagram from scratch or use an existing template
+                  Design field service workflows and business processes using our visual process designer
                 </p>
                 <div className="space-x-4">
                   <button 

@@ -17,9 +17,9 @@ import {
   SidebarMenuItem,
   SidebarRail,
   SidebarSeparator,
-  SidebarTrigger,
+  useSidebar,
 } from "@/components/ui/sidebar"
-import { Bell, CalendarDays, CheckSquare, LayoutDashboard, Settings, Users, Building2, BarChart3, Workflow, Package } from "lucide-react"
+import { Bell, CalendarDays, CheckSquare, LayoutDashboard, Settings, Users, Building2, BarChart3, Workflow, Package, Menu } from "lucide-react"
 import { cn } from "@/lib/utils"
 
 type NavItem = {
@@ -39,6 +39,21 @@ const navItems: NavItem[] = [
   { label: "Settings", href: "/settings", icon: Settings },
 ]
 
+// Custom hamburger menu component that's always visible
+const HamburgerMenu = () => {
+  const { toggleSidebar } = useSidebar()
+  
+  return (
+    <button
+      onClick={toggleSidebar}
+      className="p-2 rounded-md hover:bg-gray-100 transition-colors"
+      title="Toggle Sidebar"
+    >
+      <Menu className="w-5 h-5 text-gray-600" />
+    </button>
+  )
+}
+
 export function AppShell({ title, subtitle, children }: { title: string; subtitle?: string; children: React.ReactNode }) {
   const pathname = usePathname()
 
@@ -50,7 +65,10 @@ export function AppShell({ title, subtitle, children }: { title: string; subtitl
             <div className="size-10 rounded-full flex items-center justify-center" style={{ background: "var(--wfm-orange-500, #FF7A00)" }}>
               <LayoutDashboard className="w-5 h-5 text-white" />
             </div>
-            <span className="font-medium text-gray-900">App Name</span>
+            <div>
+              <span className="font-medium text-gray-900">FSM</span>
+              <p className="text-xs text-gray-500">Field Service Management</p>
+            </div>
           </div>
         </SidebarHeader>
         <SidebarContent>
@@ -94,7 +112,6 @@ export function AppShell({ title, subtitle, children }: { title: string; subtitl
         <header className="bg-white border-b border-gray-200 sticky top-0 z-10">
           <div className="flex h-14 items-center justify-between px-4">
             <div className="flex items-center gap-2">
-              <SidebarTrigger />
               <div>
                 <h1 className="text-lg font-semibold text-gray-900 leading-tight">{title}</h1>
                 {subtitle ? <p className="text-xs text-gray-500">{subtitle}</p> : null}
@@ -102,6 +119,7 @@ export function AppShell({ title, subtitle, children }: { title: string; subtitl
             </div>
             <div className="flex items-center gap-3 pr-1">
               <Bell className="w-5 h-5 text-gray-400" />
+              <HamburgerMenu />
             </div>
           </div>
         </header>

@@ -1,0 +1,81 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                  xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI"
+                  xmlns:dc="http://www.omg.org/spec/DD/20100524/DC"
+                  xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+                  xmlns:zeebe="http://camunda.org/schema/zeebe/1.0"
+                  id="InventoryReplenishmentDefinitions"
+                  targetNamespace="http://supplychain.example.com/bpmn">
+
+  <bpmn:process id="InventoryReplenishmentProcess" name="Inventory Replenishment Process" isExecutable="true">
+
+    <!-- Start Event -->
+    <bpmn:startEvent id="StartEvent" name="Stock Level Monitoring"/>
+
+    <!-- Service Task: Monitor Stock Levels -->
+    <bpmn:serviceTask id="MonitorStockLevels" name="Monitor Stock Levels">
+      <bpmn:extensionElements>
+        <zeebe:taskDefinition type="stock-monitoring" retries="5"/>
+      </bpmn:extensionElements>
+    </bpmn:serviceTask>
+
+    <!-- Business Rule Task: Evaluate Reorder Needs -->
+    <bpmn:businessRuleTask id="EvaluateReorder" name="Evaluate Reorder Needs"/>
+
+    <!-- User Task: Approve Reorder -->
+    <bpmn:userTask id="ApproveReorder" name="Approve Reorder"/>
+
+    <!-- Service Task: Place Order with Supplier -->
+    <bpmn:serviceTask id="PlaceOrder" name="Place Order with Supplier">
+      <bpmn:extensionElements>
+        <zeebe:taskDefinition type="place-order" retries="3"/>
+      </bpmn:extensionElements>
+    </bpmn:serviceTask>
+
+    <!-- Receive Task: Order Confirmation -->
+    <bpmn:receiveTask id="OrderConfirmation" name="Receive Order Confirmation"/>
+
+    <!-- Sub-process: Shipping and Logistics -->
+    <bpmn:subProcess id="ShippingLogisticsSubProcess" name="Shipping and Logistics Coordination">
+      <bpmn:startEvent id="ShippingStart"/>
+      <bpmn:manualTask id="ArrangeTransport" name="Arrange Transport"/>
+      <bpmn:serviceTask id="TrackShipment" name="Track Shipment">
+        <bpmn:extensionElements>
+          <zeebe:taskDefinition type="shipment-tracking" retries="3"/>
+        </bpmn:extensionElements>
+      </bpmn:serviceTask>
+      <bpmn:endEvent id="ShippingEnd"/>
+      <bpmn:sequenceFlow id="shipFlow1" sourceRef="ShippingStart" targetRef="ArrangeTransport"/>
+      <bpmn:sequenceFlow id="shipFlow2" sourceRef="ArrangeTransport" targetRef="TrackShipment"/>
+      <bpmn:sequenceFlow id="shipFlow3" sourceRef="TrackShipment" targetRef="ShippingEnd"/>
+    </bpmn:subProcess>
+
+    <!-- Script Task: Update Inventory System -->
+    <bpmn:scriptTask id="UpdateInventoryScript" name="Update Inventory System" scriptFormat="javascript">
+      <bpmn:script>
+var quantityReceived = execution.getVariable("quantityReceived");
+var currentStock = execution.getVariable("currentStock");
+execution.setVariable("updatedStock", currentStock + quantityReceived);
+      </bpmn:script>
+    </bpmn:scriptTask>
+
+    <!-- Send Task: Notify Completion -->
+    <bpmn:sendTask id="NotifyCompletion" name="Notify Replenishment Completion"/>
+
+    <!-- End Event -->
+    <bpmn:endEvent id="EndEvent" name="Replenishment Completed"/>
+
+    <!-- Sequence Flows -->
+    <bpmn:sequenceFlow id="flow1" sourceRef="StartEvent" targetRef="MonitorStockLevels"/>
+    <bpmn:sequenceFlow id="flow2" sourceRef="MonitorStockLevels" targetRef="EvaluateReorder"/>
+    <bpmn:sequenceFlow id="flow3" sourceRef="EvaluateReorder" targetRef="ApproveReorder"/>
+    <bpmn:sequenceFlow id="flow4" sourceRef="ApproveReorder" targetRef="PlaceOrder"/>
+    <bpmn:sequenceFlow id="flow5" sourceRef="PlaceOrder" targetRef="OrderConfirmation"/>
+    <bpmn:sequenceFlow id="flow6" sourceRef="OrderConfirmation" targetRef="ShippingLogisticsSubProcess"/>
+    <bpmn:sequenceFlow id="flow7" sourceRef="ShippingLogisticsSubProcess" targetRef="UpdateInventoryScript"/>
+    <bpmn:sequenceFlow id="flow8" sourceRef="UpdateInventoryScript" targetRef="NotifyCompletion"/>
+    <bpmn:sequenceFlow id="flow9" sourceRef="NotifyCompletion" targetRef="EndEvent"/>
+
+  </bpmn:process>
+
+</bpmn:definitions>

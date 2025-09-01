@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                  xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI"
+                  xmlns:dc="http://www.omg.org/spec/DD/20100524/DC"
+                  xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+                  xmlns:zeebe="http://camunda.org/schema/zeebe/1.0"
+                  id="OrderFulfillmentDefinitions"
+                  targetNamespace="http://supplychain.example.com/bpmn">
+
+  <bpmn:process id="OrderFulfillmentProcess" name="Order Fulfillment and Delivery Process" isExecutable="true">
+
+    <!-- Start Event -->
+    <bpmn:startEvent id="StartEvent" name="Order Received"/>
+
+    <!-- Receive Task: Receive Order -->
+    <bpmn:receiveTask id="ReceiveOrder" name="Receive Customer Order"/>
+
+    <!-- User Task: Validate Order and Prepare Packaging -->
+    <bpmn:userTask id="ValidateAndPackage" name="Validate Order & Prepare Packaging"/>
+
+    <!-- Service Task: Arrange Shipment -->
+    <bpmn:serviceTask id="ArrangeShipment" name="Arrange Shipment">
+      <bpmn:extensionElements>
+        <zeebe:taskDefinition type="arrange-shipment" retries="3"/>
+      </bpmn:extensionElements>
+    </bpmn:serviceTask>
+
+    <!-- Sub-process: Quality Check -->
+    <bpmn:subProcess id="QualityCheckSubProcess" name="Quality Check">
+      <bpmn:startEvent id="QCStart"/>
+      <bpmn:manualTask id="ManualQualityCheck" name="Manual Quality Check"/>
+      <bpmn:endEvent id="QCEnd"/>
+      <bpmn:sequenceFlow id="qcFlow1" sourceRef="QCStart" targetRef="ManualQualityCheck"/>
+      <bpmn:sequenceFlow id="qcFlow2" sourceRef="ManualQualityCheck" targetRef="QCEnd"/>
+    </bpmn:subProcess>
+
+    <!-- Script Task: Calculate Shipping Costs -->
+    <bpmn:scriptTask id="CalculateShippingCosts" name="Calculate Shipping Costs" scriptFormat="javascript">
+      <bpmn:script>
+var weight = execution.getVariable("packageWeight");
+var cost = weight * 5; // simple rate per kg
+execution.setVariable("shippingCost", cost);
+      </bpmn:script>
+    </bpmn:scriptTask>
+
+    <!-- Send Task: Notify Customer of Shipment -->
+    <bpmn:sendTask id="NotifyShipment" name="Notify Customer Shipment Details"/>
+
+    <!-- Receive Task: Receive Delivery Confirmation -->
+    <bpmn:receiveTask id="ReceiveDeliveryConfirmation" name="Receive Delivery Confirmation"/>
+
+    <!-- Business Rule Task: Return or Refund Eligibility -->
+    <bpmn:businessRuleTask id="EvaluateReturnEligibility" name="Evaluate Return/Refund Eligibility"/>
+
+    <!-- End Event -->
+    <bpmn:endEvent id="EndEvent" name="Order Fulfilled"/>
+
+    <!-- Sequence Flows -->
+    <bpmn:sequenceFlow id="flow1" sourceRef="StartEvent" targetRef="ReceiveOrder"/>
+    <bpmn:sequenceFlow id="flow2" sourceRef="ReceiveOrder" targetRef="ValidateAndPackage"/>
+    <bpmn:sequenceFlow id="flow3" sourceRef="ValidateAndPackage" targetRef="ArrangeShipment"/>
+    <bpmn:sequenceFlow id="flow4" sourceRef="ArrangeShipment" targetRef="QualityCheckSubProcess"/>
+    <bpmn:sequenceFlow id="flow5" sourceRef="QualityCheckSubProcess" targetRef="CalculateShippingCosts"/>
+    <bpmn:sequenceFlow id="flow6" sourceRef="CalculateShippingCosts" targetRef="NotifyShipment"/>
+    <bpmn:sequenceFlow id="flow7" sourceRef="NotifyShipment" targetRef="ReceiveDeliveryConfirmation"/>
+    <bpmn:sequenceFlow id="flow8" sourceRef="ReceiveDeliveryConfirmation" targetRef="EvaluateReturnEligibility"/>
+    <bpmn:sequenceFlow id="flow9" sourceRef="EvaluateReturnEligibility" targetRef="EndEvent"/>
+
+  </bpmn:process>
+
+</bpmn:definitions>

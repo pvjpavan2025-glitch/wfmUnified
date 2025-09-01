@@ -1,0 +1,73 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                  xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI"
+                  xmlns:dc="http://www.omg.org/spec/DD/20100524/DC"
+                  xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+                  xmlns:zeebe="http://camunda.org/schema/zeebe/1.0"
+                  id="PurchaseOrderDefinitions"
+                  targetNamespace="http://supplychain.example.com/bpmn">
+
+  <bpmn:process id="PurchaseOrderToPaymentProcess" name="Purchase Order to Payment Process" isExecutable="true">
+
+    <!-- Start Event -->
+    <bpmn:startEvent id="StartEvent" name="Purchase Request Created"/>
+
+    <!-- User Task: Create Purchase Request -->
+    <bpmn:userTask id="CreatePurchaseRequest" name="Create Purchase Request"/>
+
+    <!-- Business Rule Task: Verify Supplier Contracts -->
+    <bpmn:businessRuleTask id="VerifySupplierContracts" name="Verify Supplier Contracts"/>
+
+    <!-- Service Task: Send Purchase Order -->
+    <bpmn:serviceTask id="SendPurchaseOrder" name="Send Purchase Order to Supplier">
+      <bpmn:extensionElements>
+        <zeebe:taskDefinition type="send-purchase-order" retries="3"/>
+      </bpmn:extensionElements>
+    </bpmn:serviceTask>
+
+    <!-- Receive Task: Supplier Order Acceptance -->
+    <bpmn:receiveTask id="ReceiveOrderAcceptance" name="Receive Supplier Order Acceptance"/>
+
+    <!-- Sub-process: Goods Receipt with Manual Inspection -->
+    <bpmn:subProcess id="GoodsReceiptSubProcess" name="Goods Receipt & Inspection">
+      <bpmn:startEvent id="GoodsReceiptStart"/>
+      <bpmn:userTask id="RecordGoodsReceived" name="Record Goods Received"/>
+      <bpmn:manualTask id="ManualInspection" name="Manual Quality Inspection"/>
+      <bpmn:endEvent id="GoodsReceiptEnd"/>
+      <bpmn:sequenceFlow id="grFlow1" sourceRef="GoodsReceiptStart" targetRef="RecordGoodsReceived"/>
+      <bpmn:sequenceFlow id="grFlow2" sourceRef="RecordGoodsReceived" targetRef="ManualInspection"/>
+      <bpmn:sequenceFlow id="grFlow3" sourceRef="ManualInspection" targetRef="GoodsReceiptEnd"/>
+    </bpmn:subProcess>
+
+    <!-- Script Task: Invoice Validation -->
+    <bpmn:scriptTask id="ValidateInvoice" name="Validate Invoice" scriptFormat="python">
+      <bpmn:script>
+invoice_total = 1000
+approved_amount = 1000
+valid = (invoice_total == approved_amount)
+      </bpmn:script>
+    </bpmn:scriptTask>
+
+    <!-- Service Task: Initiate Payment -->
+    <bpmn:serviceTask id="InitiatePayment" name="Initiate Payment">
+      <bpmn:extensionElements>
+        <zeebe:taskDefinition type="initiate-payment" retries="3"/>
+      </bpmn:extensionElements>
+    </bpmn:serviceTask>
+
+    <!-- End Event -->
+    <bpmn:endEvent id="EndEvent" name="Payment Completed"/>
+
+    <!-- Sequence Flows -->
+    <bpmn:sequenceFlow id="flow1" sourceRef="StartEvent" targetRef="CreatePurchaseRequest"/>
+    <bpmn:sequenceFlow id="flow2" sourceRef="CreatePurchaseRequest" targetRef="VerifySupplierContracts"/>
+    <bpmn:sequenceFlow id="flow3" sourceRef="VerifySupplierContracts" targetRef="SendPurchaseOrder"/>
+    <bpmn:sequenceFlow id="flow4" sourceRef="SendPurchaseOrder" targetRef="ReceiveOrderAcceptance"/>
+    <bpmn:sequenceFlow id="flow5" sourceRef="ReceiveOrderAcceptance" targetRef="GoodsReceiptSubProcess"/>
+    <bpmn:sequenceFlow id="flow6" sourceRef="GoodsReceiptSubProcess" targetRef="ValidateInvoice"/>
+    <bpmn:sequenceFlow id="flow7" sourceRef="ValidateInvoice" targetRef="InitiatePayment"/>
+    <bpmn:sequenceFlow id="flow8" sourceRef="InitiatePayment" targetRef="EndEvent"/>
+
+  </bpmn:process>
+
+</bpmn:definitions>

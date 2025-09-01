@@ -4,6 +4,21 @@ const path = require('path');
 
 const PORT = 3081;
 
+// Read BPMN files from the documentation folder
+const loadBpmnFile = (fileName) => {
+  try {
+    const filePath = path.join(__dirname, 'documentation', 'bpmn-samples', fileName);
+    return fs.readFileSync(filePath, 'utf8');
+  } catch (error) {
+    console.log(`Could not load ${fileName}, using fallback`);
+    return null;
+  }
+};
+
+// Load actual BPMN files
+const telecomO2A = loadBpmnFile('telecom-o2a.xml');
+const telecomO2ACamunda = loadBpmnFile('telecom-o2a-camunda.xml');
+
 // Sample BPMN XML content
 const sampleBpmn = `<?xml version="1.0" encoding="UTF-8"?>
 <bpmn:definitions xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
@@ -165,12 +180,41 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  // Serve actual BPMN files from documentation
+  if (req.url === '/telecom-o2a.xml' && telecomO2A) {
+    res.writeHead(200, {
+      'Content-Type': 'application/xml',
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Methods': 'GET',
+      'Access-Control-Allow-Headers': 'Content-Type',
+      'Cache-Control': 'no-cache'
+    });
+    res.end(telecomO2A);
+    return;
+  }
+
+  if (req.url === '/telecom-o2a-camunda.xml' && telecomO2ACamunda) {
+    res.writeHead(200, {
+      'Content-Type': 'application/xml',
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Methods': 'GET',
+      'Access-Control-Allow-Headers': 'Content-Type',
+      'Cache-Control': 'no-cache'
+    });
+    res.end(telecomO2ACamunda);
+    return;
+  }
+
   // Default 404 response
   res.writeHead(404, {
     'Content-Type': 'text/plain',
     'Access-Control-Allow-Origin': '*'
   });
-  res.end('File not found. Try /supplychain-inventory-replinishment.xml or /sample.bpmn');
+  res.end('File not found. Available files:\n' +
+          '- /supplychain-inventory-replinishment.xml\n' +
+          '- /sample.bpmn\n' +
+          '- /telecom-o2a.xml\n' +
+          '- /telecom-o2a-camunda.xml');
 });
 
 server.listen(PORT, () => {
@@ -178,6 +222,8 @@ server.listen(PORT, () => {
   console.log('Available files:');
   console.log('  - http://localhost:3081/supplychain-inventory-replinishment.xml');
   console.log('  - http://localhost:3081/sample.bpmn');
+  console.log('  - http://localhost:3081/telecom-o2a.xml');
+  console.log('  - http://localhost:3081/telecom-o2a-camunda.xml');
   console.log('');
   console.log('Press Ctrl+C to stop the server');
 });

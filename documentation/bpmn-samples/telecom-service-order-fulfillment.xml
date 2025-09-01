@@ -1,0 +1,96 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL" xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI" xmlns:dc="http://www.omg.org/spec/DD/20100524/DC" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:zeebe="http://camunda.org/schema/zeebe/1.0" id="TelecomProcessDefinitions" targetNamespace="http://telecom.example.com/bpmn">
+
+  <bpmn:process id="TelecomServiceOrderProcess" name="Telecom Service Order Fulfillment" isExecutable="true">
+    <!-- Start: Customer requests new service -->
+    <bpmn:startEvent id="StartEvent" name="Service Request Received"/>
+    
+    <!-- SubProcess for Data Validation and Approval -->
+    <bpmn:subProcess id="ValidationApprovalSubProcess" name="Data Validation & Approval">
+      <bpmn:userTask id="ValidateCustomerData" name="Validate Customer Data"/>
+      <bpmn:userTask id="ApproveOrder" name="Approve Order"/>
+      <bpmn:manualTask id="ManualDocumentCheck" name="Manual Document Check"/>
+      <bpmn:sequenceFlow id="va1" sourceRef="ValidateCustomerData" targetRef="ApproveOrder"/>
+      <bpmn:sequenceFlow id="va2" sourceRef="ApproveOrder" targetRef="ManualDocumentCheck"/>
+    </bpmn:subProcess>
+    
+    <!-- Business Rule Task for Offer Eligibility -->
+    <bpmn:businessRuleTask id="CheckOfferEligibility" name="Check Offer Eligibility"/>
+    
+    <!-- Script Task: Calculate Fees -->
+    <bpmn:scriptTask id="CalculateFeesPython" name="Calculate Fees (Python)" scriptFormat="python">
+      <bpmn:script>
+monthly_charge = 100
+activation_fee = 25
+total_due = monthly_charge + activation_fee
+      </bpmn:script>
+    </bpmn:scriptTask>
+    
+    <!-- Script Task: Generate Confirmation Email (JavaScript) -->
+    <bpmn:scriptTask id="GenerateEmailJS" name="Generate Confirmation Email (JS)" scriptFormat="javascript">
+      <bpmn:script>
+var name = execution.getVariable("customerName");
+var email = name + "@telecom.com";
+execution.setVariable("confirmationEmail", email);
+      </bpmn:script>
+    </bpmn:scriptTask>
+    
+    <!-- Service Task: Provision New Service -->
+    <bpmn:serviceTask id="ProvisionServiceTask" name="Provision Service">
+      <bpmn:extensionElements>
+        <zeebe:taskDefinition type="provision-service" retries="3" />
+        <zeebe:taskHeaders>
+          <zeebe:header key="priority" value="standard" />
+        </zeebe:taskHeaders>
+      </bpmn:extensionElements>
+    </bpmn:serviceTask>
+    
+    <!-- Send Task: Notify Customer -->
+    <bpmn:sendTask id="NotifyCustomerSendTask" name="Notify Customer"/>
+    
+    <!-- Receive Task: Wait for Customer Acknowledgement -->
+    <bpmn:receiveTask id="ReceiveCustomerAck" name="Receive Customer Acknowledgement"/>
+    
+    <!-- Call Activity: Call Activation Sub-Process -->
+    <bpmn:callActivity id="ActivationCallActivity" name="Activate SIM" calledElement="SimActivationSubProcess"/>
+    
+    <!-- End Event -->
+    <bpmn:endEvent id="OrderFulfilledEnd" name="Order Fulfilled"/>
+    
+    <!-- Sequence Flows -->
+    <bpmn:sequenceFlow id="main1" sourceRef="StartEvent" targetRef="ValidationApprovalSubProcess"/>
+    <bpmn:sequenceFlow id="main2" sourceRef="ValidationApprovalSubProcess" targetRef="CheckOfferEligibility"/>
+    <bpmn:sequenceFlow id="main3" sourceRef="CheckOfferEligibility" targetRef="CalculateFeesPython"/>
+    <bpmn:sequenceFlow id="main4" sourceRef="CalculateFeesPython" targetRef="GenerateEmailJS"/>
+    <bpmn:sequenceFlow id="main5" sourceRef="GenerateEmailJS" targetRef="ProvisionServiceTask"/>
+    <bpmn:sequenceFlow id="main6" sourceRef="ProvisionServiceTask" targetRef="NotifyCustomerSendTask"/>
+    <bpmn:sequenceFlow id="main7" sourceRef="NotifyCustomerSendTask" targetRef="ReceiveCustomerAck"/>
+    <bpmn:sequenceFlow id="main8" sourceRef="ReceiveCustomerAck" targetRef="ActivationCallActivity"/>
+    <bpmn:sequenceFlow id="main9" sourceRef="ActivationCallActivity" targetRef="OrderFulfilledEnd"/>
+
+    <!-- Boundary Event for Manual Review on Service Failure -->
+    <bpmn:boundaryEvent id="ProvisionServiceBoundary" attachedToRef="ProvisionServiceTask">
+      <bpmn:errorEventDefinition />
+    </bpmn:boundaryEvent>
+    <bpmn:manualTask id="ManualErrorReview" name="Manual Error Review"/>
+    <bpmn:sequenceFlow id="err1" sourceRef="ProvisionServiceBoundary" targetRef="ManualErrorReview"/>
+    <bpmn:sequenceFlow id="err2" sourceRef="ManualErrorReview" targetRef="OrderFulfilledEnd"/>
+
+  </bpmn:process>
+  
+  <!-- Called Sub-Process for SIM activation -->
+  <bpmn:process id="SimActivationSubProcess" name="SIM Activation" isExecutable="true">
+    <bpmn:startEvent id="SimStart" name="Start SIM Activation"/>
+    <bpmn:userTask id="CheckActivationDocs" name="Check Activation Documents"/>
+    <bpmn:serviceTask id="ActivateSIMService" name="Activate SIM">
+      <bpmn:extensionElements>
+        <zeebe:taskDefinition type="activate-sim" retries="2"/>
+      </bpmn:extensionElements>
+    </bpmn:serviceTask>
+    <bpmn:endEvent id="SimEnd" name="SIM Activated"/>
+    <bpmn:sequenceFlow id="sim1" sourceRef="SimStart" targetRef="CheckActivationDocs"/>
+    <bpmn:sequenceFlow id="sim2" sourceRef="CheckActivationDocs" targetRef="ActivateSIMService"/>
+    <bpmn:sequenceFlow id="sim3" sourceRef="ActivateSIMService" targetRef="SimEnd"/>
+  </bpmn:process>
+  
+</bpmn:definitions>

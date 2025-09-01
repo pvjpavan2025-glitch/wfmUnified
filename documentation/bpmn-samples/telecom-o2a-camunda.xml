@@ -1,0 +1,155 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<bpmn:definitions xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+                  xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                  xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI"
+                  xmlns:dc="http://www.omg.org/spec/DD/20100524/DC"
+                  xmlns:di="http://www.omg.org/spec/DD/20100524/DI"
+                  xmlns:camunda="http://camunda.org/schema/1.0/bpmn"
+                  id="Definitions_O2A_Features"
+                  targetNamespace="http://bpmn.io/schema/bpmn"
+                  exporter="bpmn-js (https://demo.bpmn.io)"
+                  exporterVersion="18.6.1">
+
+  <bpmn:process id="Process_O2A_Features" isExecutable="true">
+
+    <!-- User Task with Embedded and External Forms, Task Listener, Inputs/Outputs, Extension Properties -->
+    <bpmn:userTask id="UserTask_ValidateCustomer" name="Validate Customer">
+      <bpmn:extensionElements>
+        <!-- Embedded Camunda Form -->
+        <camunda:formKey>embedded:app:forms/validate-form.html</camunda:formKey>
+        <!-- External Form -->
+        <camunda:formKey>camunda-forms:deployment:validate-form.form</camunda:formKey>
+        <!-- Generated Task Form Reference: via form-js or Camunda Form Generator -->
+        <!-- Inputs/Outputs -->
+        <camunda:inputOutput>
+          <camunda:inputParameter name="customerId">#{customerId}</camunda:inputParameter>
+          <camunda:outputParameter name="validationResult">${task.formFieldValidated}</camunda:outputParameter>
+        </camunda:inputOutput>
+        <!-- Task Listener on assignment -->
+        <camunda:taskListener event="assignment" class="org.example.TaskAssignmentListener"/>
+        <!-- Extension Properties -->
+        <camunda:properties>
+          <camunda:property name="customProperty" value="customValue"/>
+        </camunda:properties>
+      </bpmn:extensionElements>
+      <bpmn:incoming>Flow_Start_Validate</bpmn:incoming>
+      <bpmn:outgoing>Flow_Validate_Eligibility</bpmn:outgoing>
+    </bpmn:userTask>
+
+    <!-- Business Rule Task with External DMN, Connector, Expression -->
+    <bpmn:businessRuleTask id="BusinessRule_Eligibility" name="Eligibility Check">
+      <bpmn:extensionElements>
+        <!-- DMN Table reference (External Decision) -->
+        <camunda:decisionRef>EligibilityDecisionTable</camunda:decisionRef>
+        <!-- DMN Version -->
+        <camunda:decisionRefVersion>2</camunda:decisionRefVersion>
+        <!-- Input/Output Mapping -->
+        <camunda:inputOutput>
+          <camunda:inputParameter name="customer_age">${customerAge}</camunda:inputParameter>
+          <camunda:outputParameter name="isEligible">${isEligible}</camunda:outputParameter>
+        </camunda:inputOutput>
+        <!-- Expression (for advanced use) -->
+        <camunda:expression>${isEligible == true}</camunda:expression>
+        <!-- Connector -->
+        <camunda:connector>
+          <camunda:inputOutput>
+            <camunda:inputParameter name="url">http://api.example.com/check-eligibility</camunda:inputParameter>
+            <camunda:inputParameter name="method">POST</camunda:inputParameter>
+          </camunda:inputOutput>
+        </camunda:connector>
+      </bpmn:extensionElements>
+      <bpmn:incoming>Flow_Validate_Eligibility</bpmn:incoming>
+      <bpmn:outgoing>Flow_Eligibility_Provision</bpmn:outgoing>
+    </bpmn:businessRuleTask>
+
+    <!-- Service Task with Connector and Expression, Execution Listener -->
+    <bpmn:serviceTask id="ServiceTask_Provision" name="Provision Service">
+      <bpmn:extensionElements>
+        <!-- Connector (example: HTTP) -->
+        <camunda:connector>
+          <camunda:inputOutput>
+            <camunda:inputParameter name="url">http://api.example.com/provision</camunda:inputParameter>
+            <camunda:inputParameter name="method">POST</camunda:inputParameter>
+            <camunda:inputParameter name="body">${requestBody}</camunda:inputParameter>
+            <camunda:outputParameter name="provisionStatus">${responseStatus}</camunda:outputParameter>
+          </camunda:inputOutput>
+        </camunda:connector>
+        <!-- Expression (service delegation) -->
+        <camunda:expression>${provisionStatus == 'OK'}</camunda:expression>
+        <!-- Execution Listener on end -->
+        <camunda:executionListener event="end" class="org.example.ProvisionEndListener"/>
+      </bpmn:extensionElements>
+      <bpmn:incoming>Flow_Eligibility_Provision</bpmn:incoming>
+      <bpmn:outgoing>Flow_Provision_Notify</bpmn:outgoing>
+    </bpmn:serviceTask>
+
+    <!-- Script Task with Inline Script -->
+    <bpmn:scriptTask id="ScriptTask_GenerateConfirmation" name="Generate Confirmation">
+      <bpmn:extensionElements>
+        <camunda:script scriptFormat="javascript"><![CDATA[
+          var confirmationMsg = 'Provisioning completed for ' + execution.getVariable('customerId');
+          execution.setVariable('confirmationMsg', confirmationMsg);
+        ]]></camunda:script>
+      </bpmn:extensionElements>
+      <bpmn:incoming>Flow_Provision_Notify</bpmn:incoming>
+      <bpmn:outgoing>Flow_Notify_End</bpmn:outgoing>
+    </bpmn:scriptTask>
+
+    <!-- Start, End, and Sequence Flows -->
+    <bpmn:startEvent id="StartEvent_Request">
+      <bpmn:outgoing>Flow_Start_Validate</bpmn:outgoing>
+    </bpmn:startEvent>
+    <bpmn:sequenceFlow id="Flow_Start_Validate" sourceRef="StartEvent_Request" targetRef="UserTask_ValidateCustomer" />
+    <bpmn:sequenceFlow id="Flow_Validate_Eligibility" sourceRef="UserTask_ValidateCustomer" targetRef="BusinessRule_Eligibility" />
+    <bpmn:sequenceFlow id="Flow_Eligibility_Provision" sourceRef="BusinessRule_Eligibility" targetRef="ServiceTask_Provision" />
+    <bpmn:sequenceFlow id="Flow_Provision_Notify" sourceRef="ServiceTask_Provision" targetRef="ScriptTask_GenerateConfirmation" />
+    <bpmn:sequenceFlow id="Flow_Notify_End" sourceRef="ScriptTask_GenerateConfirmation" targetRef="EndEvent_Confirmed" />
+    <bpmn:endEvent id="EndEvent_Confirmed">
+      <bpmn:incoming>Flow_Notify_End</bpmn:incoming>
+    </bpmn:endEvent>
+
+  </bpmn:process>
+
+  <bpmndi:BPMNDiagram id="Diagram_O2A_Features">
+    <bpmndi:BPMNPlane id="Plane_O2A_Features" bpmnElement="Process_O2A_Features">
+      <bpmndi:BPMNShape id="Shape_StartEvent_Request" bpmnElement="StartEvent_Request">
+        <dc:Bounds x="100" y="100" width="36" height="36"/>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_UserTask_ValidateCustomer" bpmnElement="UserTask_ValidateCustomer">
+        <dc:Bounds x="180" y="87" width="100" height="60"/>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_BusinessRule_Eligibility" bpmnElement="BusinessRule_Eligibility">
+        <dc:Bounds x="320" y="87" width="100" height="60"/>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_ServiceTask_Provision" bpmnElement="ServiceTask_Provision">
+        <dc:Bounds x="460" y="87" width="100" height="60"/>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_ScriptTask_GenerateConfirmation" bpmnElement="ScriptTask_GenerateConfirmation">
+        <dc:Bounds x="600" y="87" width="120" height="60"/>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_EndEvent_Confirmed" bpmnElement="EndEvent_Confirmed">
+        <dc:Bounds x="760" y="100" width="36" height="36"/>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNEdge id="Edge_Flow_Start_Validate" bpmnElement="Flow_Start_Validate">
+        <di:waypoint x="136" y="118" />
+        <di:waypoint x="180" y="117" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Flow_Validate_Eligibility" bpmnElement="Flow_Validate_Eligibility">
+        <di:waypoint x="280" y="117" />
+        <di:waypoint x="320" y="117" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Flow_Eligibility_Provision" bpmnElement="Flow_Eligibility_Provision">
+        <di:waypoint x="420" y="117" />
+        <di:waypoint x="460" y="117" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Flow_Provision_Notify" bpmnElement="Flow_Provision_Notify">
+        <di:waypoint x="560" y="117" />
+        <di:waypoint x="600" y="117" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Flow_Notify_End" bpmnElement="Flow_Notify_End">
+        <di:waypoint x="720" y="117" />
+        <di:waypoint x="760" y="118" />
+      </bpmndi:BPMNEdge>
+    </bpmndi:BPMNPlane>
+  </bpmndi:BPMNDiagram>
+</bpmn:definitions>

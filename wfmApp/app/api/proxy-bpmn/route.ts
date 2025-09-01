@@ -23,11 +23,26 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    // Security check - only allow specific hosts or localhost
+    // Security check - allow localhost, common domains, and CDNs
     const allowedHosts = ['localhost', '127.0.0.1'];
-    if (!allowedHosts.includes(validUrl.hostname) && !validUrl.hostname.endsWith('.local')) {
-      // For production, you might want to allow specific external domains
+    const allowedDomains = [
+      'cdn.staticaly.com',
+      'raw.githubusercontent.com', 
+      'github.com',
+      'gitlab.com',
+      'bitbucket.org'
+    ];
+    
+    const isAllowed = allowedHosts.includes(validUrl.hostname) || 
+                     validUrl.hostname.endsWith('.local') ||
+                     allowedDomains.some(domain => validUrl.hostname === domain || validUrl.hostname.endsWith('.' + domain));
+    
+    if (!isAllowed) {
       console.warn(`Blocked request to potentially unsafe host: ${validUrl.hostname}`);
+      return NextResponse.json(
+        { error: `Access to domain '${validUrl.hostname}' is not allowed for security reasons` },
+        { status: 403 }
+      );
     }
 
     console.log(`Proxying request to: ${targetUrl}`);

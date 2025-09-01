@@ -33,6 +33,8 @@ const BpmnModelerComponent: React.FC<BpmnModelerProps> = ({ onSave, onClose }) =
   const [showImportDialog, setShowImportDialog] = useState<boolean>(false);
   const [importUrl, setImportUrl] = useState<string>('');
   const [isImporting, setIsImporting] = useState<boolean>(false);
+  const [importMethod, setImportMethod] = useState<'url' | 'file'>('url');
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (!containerRef.current || !propertiesPanelRef.current) return;
@@ -62,33 +64,10 @@ const BpmnModelerComponent: React.FC<BpmnModelerProps> = ({ onSave, onClose }) =
           }
         });
 
-        // Wait for the modeler to be ready
-        await new Promise(resolve => setTimeout(resolve, 500));
+        // Wait for the modeler to be fully ready and ensure DOM is mounted
+        await new Promise(resolve => setTimeout(resolve, 1000));
 
-        // Create an empty BPMN diagram by importing default XML
-        const defaultBpmnXml = `<?xml version="1.0" encoding="UTF-8"?>
-<bpmn:definitions xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-                  xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
-                  xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI"
-                  xmlns:dc="http://www.omg.org/spec/DD/20100524/DC"
-                  targetNamespace="http://bpmn.io/schema/bpmn"
-                  id="Definitions_1">
-  <bpmn:process id="Process_1" isExecutable="false">
-    <bpmn:startEvent id="StartEvent_1" />
-  </bpmn:process>
-  <bpmndi:BPMNDiagram id="BPMNDiagram_1">
-    <bpmndi:BPMNPlane id="BPMNPlane_1" bpmnElement="Process_1">
-      <bpmndi:BPMNShape id="_BPMNShape_StartEvent_2" bpmnElement="StartEvent_1">
-        <dc:Bounds x="173" y="102" width="36" height="36" />
-      </bpmndi:BPMNShape>
-    </bpmndi:BPMNPlane>
-  </bpmndi:BPMNDiagram>
-</bpmn:definitions>`;
-
-        // Import the default BPMN XML to create an empty diagram
-        await (newModeler as any).importXML(defaultBpmnXml);
-        
-        // Set up event listeners
+                // Set up event listeners
         const eventBus = newModeler.get('eventBus') as any;
         
         // Listen for element selection changes
@@ -100,23 +79,26 @@ const BpmnModelerComponent: React.FC<BpmnModelerProps> = ({ onSave, onClose }) =
             setSelectedElement(null);
           }
         });
-        
-        
-        const { xml: newXml } = await newModeler.saveXML({ format: true });
-        setXml(newXml || '');
-        setError('');
 
+        // Set the modeler state - this makes it available for other functions
         setModeler(newModeler);
+        
+        // Don't create any diagram initially - let the user create one manually
+        // This prevents the "root-0" error during initialization
+        setError('');
+        setXml('');
 
         // Check for URL parameter for auto-import
         const urlParams = new URLSearchParams(window.location.search);
         const autoImportUrl = urlParams.get('url');
-        if (autoImportUrl && newModeler) {
+        if (autoImportUrl) {
           setImportUrl(decodeURIComponent(autoImportUrl));
           // Auto-import after modeler is ready
           setTimeout(() => {
-            handleAutoImport(decodeURIComponent(autoImportUrl), newModeler);
-          }, 1000);
+            if (newModeler) {
+              handleAutoImport(decodeURIComponent(autoImportUrl), newModeler);
+            }
+          }, 2000); // Give more time for full initialization
         }
 
       } catch (err) {
@@ -187,11 +169,38 @@ const BpmnModelerComponent: React.FC<BpmnModelerProps> = ({ onSave, onClose }) =
         const { xml: savedXml } = await modeler.saveXML({ format: true });
         const xmlString = savedXml || '';
         setXml(xmlString);
+        
+        // Save to database via API instead of public folder
+        try {
+          const response = await fetch('/api/bpmn/save', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              xml: xmlString,
+              timestamp: new Date().toISOString(),
+              name: `workflow_${Date.now()}`
+            }),
+          });
+          
+          if (response.ok) {
+            const result = await response.json();
+            console.log('BPMN saved to database:', result);
+            alert(`Workflow saved successfully! ID: ${result.id}`);
+          } else {
+            throw new Error('Failed to save to database');
+          }
+        } catch (saveError) {
+          console.warn('Database save failed, using local storage:', saveError);
+          // Fallback to local storage
+          localStorage.setItem('bpmn_workflow', xmlString);
+          alert('Workflow saved locally (database unavailable)');
+        }
+        
         if (onSave) {
           onSave(xmlString);
         }
-        console.log('BPMN XML saved:', savedXml);
-        alert('Workflow saved successfully! Check console for XML content.');
       } catch (err) {
         console.error('Error saving diagram:', err);
         setError('Failed to save diagram');
@@ -219,27 +228,11 @@ const BpmnModelerComponent: React.FC<BpmnModelerProps> = ({ onSave, onClose }) =
         setIsLoading(true);
         setError('');
         
-        // Create an empty BPMN diagram by importing default XML
-        const defaultBpmnXml = `<?xml version="1.0" encoding="UTF-8"?>
-<bpmn:definitions xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-                  xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
-                  xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI"
-                  xmlns:dc="http://www.omg.org/spec/DD/20100524/DC"
-                  targetNamespace="http://bpmn.io/schema/bpmn"
-                  id="Definitions_1">
-  <bpmn:process id="Process_1" isExecutable="false">
-    <bpmn:startEvent id="StartEvent_1" />
-  </bpmn:process>
-  <bpmndi:BPMNDiagram id="BPMNDiagram_1">
-    <bpmndi:BPMNPlane id="BPMNPlane_1" bpmnElement="Process_1">
-      <bpmndi:BPMNShape id="_BPMNShape_StartEvent_2" bpmnElement="StartEvent_1">
-        <dc:Bounds x="173" y="102" width="36" height="36" />
-      </bpmndi:BPMNShape>
-    </bpmndi:BPMNPlane>
-  </bpmndi:BPMNDiagram>
-</bpmn:definitions>`;
-
-        await (modeler as any).importXML(defaultBpmnXml);
+        // Wait a moment to ensure modeler is ready
+        await new Promise(resolve => setTimeout(resolve, 100));
+        
+        // Create a new diagram using the createDiagram method
+        await (modeler as any).createDiagram();
         
         // Zoom to fit the viewport
         const canvas = (modeler as any).get('canvas');
@@ -325,9 +318,91 @@ const BpmnModelerComponent: React.FC<BpmnModelerProps> = ({ onSave, onClose }) =
   const handleImportCancel = () => {
     setShowImportDialog(false);
     setImportUrl('');
+    setImportMethod('url');
   };
 
-    const handleImportFromUrl = async () => {
+  const handleFileImport = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    setIsImporting(true);
+    setError('');
+
+    try {
+      const xmlContent = await file.text();
+      
+      if (!xmlContent || xmlContent.trim().length === 0) {
+        throw new Error('The file is empty');
+      }
+
+      // Validate that it looks like XML
+      if (!xmlContent.trim().startsWith('<?xml') && !xmlContent.trim().startsWith('<')) {
+        throw new Error('The file does not contain valid XML content');
+      }
+
+      console.log('Successfully loaded file content, length:', xmlContent.length);
+
+      // Validate and normalize the BPMN XML
+      const normalizedXml = validateAndNormalizeBpmnXml(xmlContent);
+
+      // Import the XML into the modeler
+      if (modeler) {
+        // Clear any existing diagram first
+        try {
+          await (modeler as any).clear();
+        } catch (clearError) {
+          console.warn('Could not clear existing diagram:', clearError);
+        }
+        
+        await (modeler as any).importXML(normalizedXml);
+        console.log('BPMN XML imported successfully from file');
+        
+        // Zoom to fit the viewport
+        const canvas = (modeler as any).get('canvas');
+        if (canvas && typeof canvas.zoom === 'function') {
+          canvas.zoom('fit-viewport');
+        }
+        
+        // Update the XML state
+        const { xml: importedXml } = await (modeler as any).saveXML({ format: true });
+        setXml(importedXml || '');
+        
+        // Close the dialog on success
+        setShowImportDialog(false);
+        setImportUrl('');
+        setImportMethod('url');
+      } else {
+        throw new Error('BPMN Modeler not initialized');
+      }
+
+    } catch (error) {
+      console.error('Error importing BPMN from file:', error);
+      setError(error instanceof Error ? error.message : 'Unknown error occurred');
+    } finally {
+      setIsImporting(false);
+      // Reset file input
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
+    }
+  };
+
+    const validateAndNormalizeBpmnXml = (xmlContent: string): string => {
+    // Check if it's a valid BPMN XML with proper structure
+    if (!xmlContent.includes('bpmn:definitions') && !xmlContent.includes('<definitions')) {
+      throw new Error('Invalid BPMN format: Missing bpmn:definitions element');
+    }
+    
+    // Check for diagram elements
+    if (!xmlContent.includes('bpmndi:BPMNDiagram') && !xmlContent.includes('BPMNDiagram')) {
+      console.warn('No diagram information found, creating basic diagram structure');
+      // For XML without diagram info, we'll let bpmn-js handle the layout
+    }
+    
+    return xmlContent;
+  };
+
+  const handleImportFromUrl = async () => {
     if (!importUrl.trim()) {
       setError('Please enter a valid URL');
       return;
@@ -399,10 +474,54 @@ const BpmnModelerComponent: React.FC<BpmnModelerProps> = ({ onSave, onClose }) =
 
       console.log('Successfully fetched XML content, length:', xmlContent.length);
 
+      // Validate and normalize the BPMN XML
+      const normalizedXml = validateAndNormalizeBpmnXml(xmlContent);
+
       // Import the XML into the modeler
       if (modeler) {
-        await (modeler as any).importXML(xmlContent);
+        // Clear any existing diagram first to avoid "element already exists" errors
+        try {
+          await (modeler as any).clear();
+        } catch (clearError) {
+          console.warn('Could not clear existing diagram:', clearError);
+          // Create a new modeler instance if clearing fails
+          const newModeler = new BpmnModeler({
+            container: containerRef.current!,
+            propertiesPanel: {
+              parent: propertiesPanelRef.current!
+            },
+            additionalModules: [
+              BpmnPropertiesPanelModule,
+              BpmnPropertiesProviderModule,
+              CamundaPlatformPropertiesProviderModule,
+              ColorPickerModule,
+              MinimapModule
+            ],
+            moddleExtensions: {
+              camunda: camundaModdleDescriptor
+            }
+          });
+          setModeler(newModeler);
+          await (newModeler as any).importXML(normalizedXml);
+        }
+        
+        if (modeler) {
+          await (modeler as any).importXML(normalizedXml);
+        } else {
+          throw new Error('BPMN Modeler not initialized after clearing');
+        }
+        
         console.log('BPMN XML imported successfully');
+        
+        // Zoom to fit the viewport
+        const canvas = (modeler as any).get('canvas');
+        if (canvas && typeof canvas.zoom === 'function') {
+          canvas.zoom('fit-viewport');
+        }
+        
+        // Update the XML state
+        const { xml: importedXml } = await (modeler as any).saveXML({ format: true });
+        setXml(importedXml || '');
         
         // Close the dialog on success
         setShowImportDialog(false);
@@ -591,6 +710,32 @@ const BpmnModelerComponent: React.FC<BpmnModelerProps> = ({ onSave, onClose }) =
       <div className="flex-1 flex">
         {/* BPMN Canvas */}
         <div className="flex-1 relative">
+          {/* Empty state message when no diagram is loaded */}
+          {!isLoading && !xml && !error && (
+            <div className="absolute inset-0 flex items-center justify-center bg-gray-50">
+              <div className="text-center">
+                <svg className="mx-auto h-16 w-16 text-gray-400 mb-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                </svg>
+                <h3 className="text-lg font-medium text-gray-900 mb-2">Ready to Model</h3>
+                <p className="text-gray-500 mb-4">Create a new BPMN diagram or import an existing one</p>
+                <div className="space-x-3">
+                  <button
+                    onClick={handleNewDiagram}
+                    className="bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded text-sm font-medium"
+                  >
+                    Create New Diagram
+                  </button>
+                  <button
+                    onClick={handleImport}
+                    className="bg-cyan-600 hover:bg-cyan-700 text-white px-4 py-2 rounded text-sm font-medium"
+                  >
+                    Import Diagram
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
           <div
             ref={containerRef}
             className="w-full h-full border-r border-gray-200"
@@ -710,31 +855,85 @@ const BpmnModelerComponent: React.FC<BpmnModelerProps> = ({ onSave, onClose }) =
       {/* Import Dialog */}
       {showImportDialog && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-lg shadow-xl max-w-md w-full mx-4">
+          <div className="bg-white rounded-lg shadow-xl max-w-lg w-full mx-4">
             <div className="p-6">
               <h3 className="text-lg font-medium text-gray-900 mb-4">
-                Import BPMN from URL
+                Import BPMN Diagram
               </h3>
+              
+              {/* Import Method Selector */}
               <div className="mb-4">
-                <label htmlFor="import-url" className="block text-sm font-medium text-gray-700 mb-2">
-                  BPMN File URL
-                </label>
-                <input
-                  id="import-url"
-                  type="url"
-                  value={importUrl}
-                  onChange={(e) => setImportUrl(e.target.value)}
-                  placeholder="https://example.com/diagram.bpmn"
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
-                  disabled={isImporting}
-                />
-                <p className="mt-1 text-xs text-gray-500">
-                  Enter the URL of a BPMN file (.bpmn or .xml) to import. Note: The server must allow cross-origin requests (CORS) for this to work.
-                </p>
-                <p className="mt-1 text-xs text-blue-600">
-                  💡 Tip: Try this sample URL: https://cdn.staticaly.com/gh/bpmn-io/bpmn-js-examples/master/starter/diagram.bpmn
-                </p>
+                <div className="flex space-x-4 mb-3">
+                  <button
+                    onClick={() => setImportMethod('url')}
+                    className={`px-3 py-2 text-sm font-medium rounded-md ${
+                      importMethod === 'url'
+                        ? 'bg-blue-100 text-blue-700 border border-blue-300'
+                        : 'bg-gray-100 text-gray-700 border border-gray-300 hover:bg-gray-200'
+                    }`}
+                    disabled={isImporting}
+                  >
+                    From URL
+                  </button>
+                  <button
+                    onClick={() => setImportMethod('file')}
+                    className={`px-3 py-2 text-sm font-medium rounded-md ${
+                      importMethod === 'file'
+                        ? 'bg-blue-100 text-blue-700 border border-blue-300'
+                        : 'bg-gray-100 text-gray-700 border border-gray-300 hover:bg-gray-200'
+                    }`}
+                    disabled={isImporting}
+                  >
+                    From File
+                  </button>
+                </div>
               </div>
+
+              {/* URL Import */}
+              {importMethod === 'url' && (
+                <div className="mb-4">
+                  <label htmlFor="import-url" className="block text-sm font-medium text-gray-700 mb-2">
+                    BPMN File URL
+                  </label>
+                  <input
+                    id="import-url"
+                    type="url"
+                    value={importUrl}
+                    onChange={(e) => setImportUrl(e.target.value)}
+                    placeholder="https://example.com/diagram.bpmn"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                    disabled={isImporting}
+                  />
+                  <p className="mt-1 text-xs text-gray-500">
+                    Enter the URL of a BPMN file (.bpmn or .xml). Works with localhost, cloud URLs, and CORS-enabled servers.
+                  </p>
+                  <p className="mt-1 text-xs text-blue-600">
+                    💡 Sample: https://cdn.staticaly.com/gh/bpmn-io/bpmn-js-examples/master/starter/diagram.bpmn
+                  </p>
+                </div>
+              )}
+
+              {/* File Import */}
+              {importMethod === 'file' && (
+                <div className="mb-4">
+                  <label htmlFor="import-file" className="block text-sm font-medium text-gray-700 mb-2">
+                    BPMN File
+                  </label>
+                  <input
+                    ref={fileInputRef}
+                    id="import-file"
+                    type="file"
+                    accept=".bpmn,.xml"
+                    onChange={handleFileImport}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-medium file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"
+                    disabled={isImporting}
+                  />
+                  <p className="mt-1 text-xs text-gray-500">
+                    Select a BPMN file (.bpmn or .xml) from your computer to import.
+                  </p>
+                </div>
+              )}
+
               <div className="flex justify-end space-x-3">
                 <button
                   onClick={handleImportCancel}
@@ -743,13 +942,15 @@ const BpmnModelerComponent: React.FC<BpmnModelerProps> = ({ onSave, onClose }) =
                 >
                   Cancel
                 </button>
-                <button
-                  onClick={handleImportFromUrl}
-                  className="px-4 py-2 text-sm font-medium text-white bg-blue-600 border border-transparent rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
-                  disabled={isImporting || !importUrl.trim()}
-                >
-                  {isImporting ? 'Importing...' : 'Import'}
-                </button>
+                {importMethod === 'url' && (
+                  <button
+                    onClick={handleImportFromUrl}
+                    className="px-4 py-2 text-sm font-medium text-white bg-blue-600 border border-transparent rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                    disabled={isImporting || !importUrl.trim()}
+                  >
+                    {isImporting ? 'Importing...' : 'Import from URL'}
+                  </button>
+                )}
               </div>
             </div>
           </div>

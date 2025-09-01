@@ -509,14 +509,35 @@ const BpmnModelerComponent: React.FC<BpmnModelerProps> = ({ onSave, onClose, aut
   };
 
     const validateAndNormalizeBpmnXml = (xmlContent: string): string => {
+    // Basic XML structure validation
+    if (!xmlContent || xmlContent.trim().length === 0) {
+      throw new Error('Empty content: The file appears to be empty');
+    }
+    
+    // Check if it starts with XML declaration or root element
+    const trimmedContent = xmlContent.trim();
+    if (!trimmedContent.startsWith('<?xml') && !trimmedContent.startsWith('<')) {
+      throw new Error('Invalid XML format: Content does not appear to be valid XML');
+    }
+    
+    // Check for basic XML well-formedness indicators
+    if (!trimmedContent.includes('<') || !trimmedContent.includes('>')) {
+      throw new Error('Invalid XML format: Missing basic XML structure');
+    }
+    
     // Check if it's a valid BPMN XML with proper structure
     if (!xmlContent.includes('bpmn:definitions') && !xmlContent.includes('<definitions')) {
-      throw new Error('Invalid BPMN format: Missing bpmn:definitions element');
+      throw new Error('Invalid BPMN format: Not a BPMN file - missing definitions element');
+    }
+    
+    // Check for process elements (essential for BPMN)
+    if (!xmlContent.includes('bpmn:process') && !xmlContent.includes('<process')) {
+      throw new Error('Invalid BPMN format: No process elements found - this may not be a valid BPMN diagram');
     }
     
     // Check for diagram elements
     if (!xmlContent.includes('bpmndi:BPMNDiagram') && !xmlContent.includes('BPMNDiagram')) {
-      console.warn('No diagram information found, creating basic diagram structure');
+      console.warn('No diagram information found - BPMN.js will attempt to create layout automatically');
       // For XML without diagram info, we'll let bpmn-js handle the layout
     }
     
@@ -643,9 +664,41 @@ const BpmnModelerComponent: React.FC<BpmnModelerProps> = ({ onSave, onClose, aut
             }
           });
           
-          // Import using the temporary modeler
-          await (tempModeler as any).importXML(normalizedXml);
-          console.log('BPMN XML imported successfully from URL using temp modeler');
+          // Import using the temporary modeler with proper error handling
+          try {
+            await (tempModeler as any).importXML(normalizedXml);
+            console.log('BPMN XML imported successfully from URL using temp modeler');
+          } catch (tempImportError) {
+            // Handle specific BPMN import errors
+            const errorMessage = tempImportError instanceof Error ? tempImportError.message : String(tempImportError);
+            
+            // Clean up temp modeler
+            if (tempModeler) {
+              tempModeler.destroy();
+              tempModeler = null;
+            }
+            
+            // Check for specific error types
+            if (errorMessage.includes('no diagram to display')) {
+              showToast('Invalid BPMN file: The file does not contain a valid BPMN diagram', 'error');
+              setError('Invalid BPMN file: No diagram found in the provided file');
+            } else if (errorMessage.includes('unparsable content')) {
+              showToast('Invalid BPMN file: The file contains unparsable XML content', 'error');
+              setError('Invalid BPMN file: XML content is malformed');
+            } else if (errorMessage.includes('unknown type')) {
+              showToast('Invalid BPMN file: The file contains unsupported BPMN elements', 'error');
+              setError('Invalid BPMN file: Contains unsupported elements');
+            } else {
+              showToast(`Invalid BPMN file: ${errorMessage}`, 'error');
+              setError(`Invalid BPMN file: ${errorMessage}`);
+            }
+            
+            console.error('BPMN import failed:', tempImportError);
+            
+            // Reset the import state but keep the dialog open for retry
+            setIsImporting(false);
+            return; // Exit the function, don't proceed with further processing
+          }
           
           // Get the imported XML from temp modeler
           const { xml: importedXml } = await tempModeler.saveXML({ format: true });
@@ -727,14 +780,30 @@ const BpmnModelerComponent: React.FC<BpmnModelerProps> = ({ onSave, onClose, aut
           
           console.error('Import error:', importError);
           const errorMessage = importError instanceof Error ? importError.message : 'Unknown import error';
-          showToast(`Import failed: ${errorMessage}`, 'error');
-          setError(`Import failed: ${errorMessage}`);
-          return; // Don't proceed with UI updates
+          
+          // Check if this is a BPMN validity error vs a system error
+          if (errorMessage.includes('no diagram to display') || 
+              errorMessage.includes('unparsable content') || 
+              errorMessage.includes('unknown type') ||
+              errorMessage.includes('Invalid BPMN')) {
+            // These are file validity errors - show user-friendly message but keep dialog open
+            showToast(`Invalid BPMN file: ${errorMessage}`, 'error');
+            setError(`Please check your BPMN file and try again. Error: ${errorMessage}`);
+            setIsImporting(false);
+            return; // Don't close dialog, let user try again
+          } else {
+            // These are system errors - show error and close dialog
+            showToast(`Import failed: ${errorMessage}`, 'error');
+            setError(`Import failed: ${errorMessage}`);
+            setIsImporting(false);
+            return; // Don't proceed with UI updates
+          }
         }
         
-        // Close the dialog on success
+        // Close the dialog only on successful import
         setShowImportDialog(false);
         setImportUrl('');
+        showToast('Import dialog closed after successful import', 'info');
       } else {
         const errorMsg = 'BPMN Modeler not initialized';
         showToast(errorMsg, 'error');
@@ -743,7 +812,26 @@ const BpmnModelerComponent: React.FC<BpmnModelerProps> = ({ onSave, onClose, aut
 
     } catch (error) {
       console.error('Error importing BPMN from URL:', error);
-      setError(error instanceof Error ? error.message : 'Unknown error occurred');
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
+      
+      // Check if this is a file validity error or a system error
+      if (errorMessage.includes('no diagram to display') || 
+          errorMessage.includes('unparsable content') || 
+          errorMessage.includes('unknown type') ||
+          errorMessage.includes('Invalid BPMN') ||
+          errorMessage.includes('empty content') ||
+          errorMessage.includes('not return valid XML')) {
+        // File validity errors - keep dialog open for retry
+        showToast(`Invalid file: ${errorMessage}`, 'error');
+        setError(`Please check your file and try again. ${errorMessage}`);
+      } else {
+        // System errors - these are more serious
+        showToast(`Import failed: ${errorMessage}`, 'error');
+        setError(`Import failed: ${errorMessage}`);
+        // For system errors, close the dialog
+        setShowImportDialog(false);
+        setImportUrl('');
+      }
     } finally {
       setIsImporting(false);
     }
@@ -1205,6 +1293,20 @@ const BpmnModelerComponent: React.FC<BpmnModelerProps> = ({ onSave, onClose, aut
                   <p className="mt-1 text-xs text-blue-600">
                     💡 Sample: https://cdn.staticaly.com/gh/bpmn-io/bpmn-js-examples/master/starter/diagram.bpmn
                   </p>
+                  {error && (
+                    <p className="mt-2 text-xs text-red-600">
+                      ⚠️ {error}
+                    </p>
+                  )}
+                  <div className="mt-2 p-2 bg-gray-50 rounded-md border">
+                    <p className="text-xs text-gray-600 font-medium">Valid BPMN files must contain:</p>
+                    <ul className="text-xs text-gray-600 mt-1 space-y-1">
+                      <li>• XML format with proper structure</li>
+                      <li>• BPMN definitions element</li>
+                      <li>• At least one process element</li>
+                      <li>• Valid BPMN 2.0 schema compliance</li>
+                    </ul>
+                  </div>
                 </div>
               )}
 
@@ -1226,6 +1328,20 @@ const BpmnModelerComponent: React.FC<BpmnModelerProps> = ({ onSave, onClose, aut
                   <p className="mt-1 text-xs text-gray-500">
                     Select a BPMN file (.bpmn or .xml) from your computer to import.
                   </p>
+                  {error && (
+                    <p className="mt-2 text-xs text-red-600">
+                      ⚠️ {error}
+                    </p>
+                  )}
+                  <div className="mt-2 p-2 bg-gray-50 rounded-md border">
+                    <p className="text-xs text-gray-600 font-medium">Valid BPMN files must contain:</p>
+                    <ul className="text-xs text-gray-600 mt-1 space-y-1">
+                      <li>• XML format with proper structure</li>
+                      <li>• BPMN definitions element</li>
+                      <li>• At least one process element</li>
+                      <li>• Valid BPMN 2.0 schema compliance</li>
+                    </ul>
+                  </div>
                 </div>
               )}
 

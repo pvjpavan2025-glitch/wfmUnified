@@ -3,6 +3,8 @@
  */
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_BPMN_BACKEND_URL || 'http://localhost:8100';
+// When running in the browser, use the Next.js proxy to avoid CORS issues
+const BROWSER_PROXY_PREFIX = typeof window !== 'undefined' ? '/api/backend?path=' : undefined;
 
 // Types
 export interface Process {
@@ -135,7 +137,12 @@ class ProcessApiService {
     options: RequestInit = {}
   ): Promise<ApiResponse<T>> {
     try {
-      const url = `${this.baseUrl}${endpoint}`;
+      let url = `${this.baseUrl}${endpoint}`;
+      // If in browser and proxy prefix is available, route through proxy
+      if (typeof window !== 'undefined' && BROWSER_PROXY_PREFIX) {
+        url = `${BROWSER_PROXY_PREFIX}${encodeURIComponent(endpoint)}`;
+      }
+
       const response = await fetch(url, {
         headers: {
           'Content-Type': 'application/json',

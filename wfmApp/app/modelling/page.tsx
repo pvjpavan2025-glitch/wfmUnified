@@ -165,10 +165,24 @@ export default function ModellingPage() {
     }
   };
 
-  const handleDeleteProcess = async (processId: string) => {
+  const handleDeleteProcess = async (processOrId: string | Process) => {
+    // Resolve ID from either a string id or a Process object (fall back to common fields)
+    const id = typeof processOrId === 'string'
+      ? processOrId
+      : (processOrId.id || (processOrId as any)._id || (processOrId as any).process_id);
+
+    if (!id) {
+      toast({
+        title: 'Error',
+        description: 'Cannot determine process id for deletion.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
     if (confirm('Are you sure you want to delete this process?')) {
       try {
-        const response = await processApiService.deleteProcess(processId);
+        const response = await processApiService.deleteProcess(id);
         if (response.data) {
           toast({
             title: 'Success',
@@ -409,7 +423,7 @@ export default function ModellingPage() {
                               <DocumentIcon className="h-4 w-4" />
                             </button>
                             <button
-                              onClick={() => handleDeleteProcess(process.id)}
+                              onClick={() => handleDeleteProcess(process)}
                               className="text-red-600 hover:text-red-900"
                               title="Delete Process"
                             >

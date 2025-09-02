@@ -176,6 +176,45 @@ const BpmnModelerComponent: React.FC<BpmnModelerProps> = ({
 
         // Set up command stack listener for dirty state
         eventBus.on('commandStack.changed', () => {
+          console.log('🔄 Command stack changed - diagram was modified');
+          onDirtyChange(true);
+          
+          // Force update the internal XML state when changes occur
+          setTimeout(async () => {
+            try {
+              const { xml: currentXml } = await (newModeler as any).saveXML({ format: true });
+              setXml(currentXml);
+              console.log('🔄 Internal XML state updated after command, length:', currentXml.length);
+            } catch (err) {
+              console.warn('⚠️ Failed to update internal XML state:', err);
+            }
+          }, 100);
+        });
+
+        // Also listen for element changes to ensure we capture all modifications
+        eventBus.on('elements.changed', () => {
+          console.log('🔄 Elements changed event');
+          onDirtyChange(true);
+        });
+
+        // Listen for shape/connection changes
+        eventBus.on('shape.added', () => {
+          console.log('➕ Shape added');
+          onDirtyChange(true);
+        });
+
+        eventBus.on('shape.removed', () => {
+          console.log('➖ Shape removed');
+          onDirtyChange(true);
+        });
+
+        eventBus.on('connection.added', () => {
+          console.log('🔗 Connection added');
+          onDirtyChange(true);
+        });
+
+        eventBus.on('connection.removed', () => {
+          console.log('🔗❌ Connection removed');
           onDirtyChange(true);
         });
 
@@ -400,9 +439,33 @@ const BpmnModelerComponent: React.FC<BpmnModelerProps> = ({
   const handleSave = async () => {
     if (!modelerRef.current) return;
     try {
-      const savedXml = await saveXmlSafely(modelerRef.current, true);
+      console.log('💾 Starting save process...');
+      
+      // Force a fresh XML export directly from the modeler
+      console.log('🔄 Forcing fresh XML export from modeler...');
+      const freshResult = await (modelerRef.current as any).saveXML({ format: true });
+      const freshXml = freshResult.xml || '';
+      
+      console.log('🔍 Fresh XML export results:');
+      console.log('📄 Fresh XML Length:', freshXml.length);
+      console.log('📄 Fresh XML Preview (first 500 chars):', freshXml.substring(0, 500));
+      console.log('📄 Fresh XML Contains elements:', {
+        hasStartEvent: freshXml.includes('startEvent'),
+        hasTask: freshXml.includes('task') || freshXml.includes('Task'),
+        hasEndEvent: freshXml.includes('endEvent'),
+        hasUserTask: freshXml.includes('userTask'),
+        hasServiceTask: freshXml.includes('serviceTask'),
+        hasGateway: freshXml.includes('Gateway') || freshXml.includes('gateway'),
+        hasSequenceFlow: freshXml.includes('sequenceFlow'),
+        elementCount: (freshXml.match(/bpmn:/g) || []).length
+      });
+      
+      // Use the fresh XML for saving
+      const savedXml = freshXml;
       setXml(savedXml);
+      
       if (onSave) {
+        console.log('🔍 Calling onSave with fresh XML length:', savedXml.length);
         onSave(savedXml);
       }
       onDirtyChange(false);

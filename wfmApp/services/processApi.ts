@@ -151,25 +151,51 @@ class ProcessApiService {
         ...options,
       });
 
+      const responseData = await response.json();
+      
       if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.detail || `HTTP error! status: ${response.status}`);
+        // Handle validation errors (422) specially
+        if (response.status === 422) {
+          const validationError = typeof responseData === 'object' 
+            ? JSON.stringify(responseData, null, 2)  // Pretty print object
+            : responseData;
+          console.error('Validation Error:', validationError);
+          throw new Error(`Validation Error: ${validationError}`);
+        }
+        
+        // Handle other errors
+        const errorMessage = responseData?.detail || 
+                           responseData?.message || 
+                           (typeof responseData === 'object' ? JSON.stringify(responseData) : responseData) ||
+                           `HTTP error! status: ${response.status}`;
+        throw new Error(errorMessage);
       }
 
-      const data = await response.json();
-      return { data };
+      return { data: responseData };
     } catch (error) {
       console.error(`API request failed for ${endpoint}:`, error);
-      return { error: error instanceof Error ? error.message : 'Unknown error occurred' };
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
+      return { error: errorMessage };
     }
   }
 
   // Process Management
   async createProcess(processData: ProcessCreate, userId: string): Promise<ApiResponse<Process>> {
-    return this.request<Process>(`/api/v1/processes/?user_id=${userId}`, {
+    console.log('🔍 API: createProcess called');
+    console.log('📄 API: Create data BPMN XML length:', processData.bpmn_xml?.length || 0);
+    console.log('📄 API: Create data BPMN XML preview:', processData.bpmn_xml?.substring(0, 150) || 'NO XML');
+    
+    const response = await this.request<Process>(`/api/v1/processes/?user_id=${userId}`, {
       method: 'POST',
       body: JSON.stringify(processData),
     });
+    
+    console.log('🔍 API: createProcess response:', response);
+    if (response.data) {
+      console.log('📄 API: Created process BPMN XML length:', response.data.bpmn_xml?.length || 0);
+      console.log('📄 API: Created process BPMN XML preview:', response.data.bpmn_xml?.substring(0, 150) || 'NO XML');
+    }
+    return response;
   }
 
   async listProcesses(params?: {
@@ -202,14 +228,32 @@ class ProcessApiService {
   }
 
   async getProcess(processId: string): Promise<ApiResponse<Process>> {
-    return this.request<Process>(`/api/v1/processes/${processId}`);
+    console.log('🔍 API: getProcess called with ID:', processId);
+    const response = await this.request<Process>(`/api/v1/processes/${processId}`);
+    console.log('🔍 API: getProcess response:', response);
+    if (response.data) {
+      console.log('📄 API: Retrieved BPMN XML length:', response.data.bpmn_xml?.length || 0);
+      console.log('📄 API: Retrieved BPMN XML preview:', response.data.bpmn_xml?.substring(0, 150) || 'NO XML');
+    }
+    return response;
   }
 
   async updateProcess(processId: string, processData: ProcessUpdate): Promise<ApiResponse<Process>> {
-    return this.request<Process>(`/api/v1/processes/${processId}`, {
+    console.log('🔍 API: updateProcess called with ID:', processId);
+    console.log('📄 API: Update data BPMN XML length:', processData.bpmn_xml?.length || 0);
+    console.log('📄 API: Update data BPMN XML preview:', processData.bpmn_xml?.substring(0, 150) || 'NO XML');
+    
+    const response = await this.request<Process>(`/api/v1/processes/${processId}?user_id=current_user`, {
       method: 'PUT',
       body: JSON.stringify(processData),
     });
+    
+    console.log('🔍 API: updateProcess response:', response);
+    if (response.data) {
+      console.log('📄 API: Updated process BPMN XML length:', response.data.bpmn_xml?.length || 0);
+      console.log('📄 API: Updated process BPMN XML preview:', response.data.bpmn_xml?.substring(0, 150) || 'NO XML');
+    }
+    return response;
   }
 
   async deleteProcess(processId: string): Promise<ApiResponse<Process>> {

@@ -16,7 +16,7 @@ import {
   TrashIcon,
   PencilIcon
 } from '@heroicons/react/24/outline';
-import { processApiService, Process, ProcessInstance, Template, ProcessCreate } from '@/services/processApi';
+import { processApiService, Process, ProcessInstance, Template, ProcessCreate, ProcessUpdate } from '@/services/processApi';
 import { useToast } from '@/hooks/use-toast';
 import { ProcessNameEditor } from '../../components/modelling/ProcessNameEditor';
 
@@ -37,6 +37,7 @@ export default function ModellingPage() {
   const [selectedTemplate, setSelectedTemplate] = useState<Template | null>(null);
   const [processName, setProcessName] = useState('New Process');
   const [isDirty, setIsDirty] = useState(false);
+  const [initialXml, setInitialXml] = useState<string>('');
   
   // State for real data
   const [processes, setProcesses] = useState<Process[]>([]);
@@ -112,16 +113,75 @@ export default function ModellingPage() {
   const handleCreateNewProcess = () => {
     setProcessName('New Process');
     setSelectedTemplate(null);
+    setInitialXml('');
     setShowBpmnEditor(true);
   };
 
   const handleCreateFromTemplate = (template: Template) => {
     setProcessName(template.name);
     setSelectedTemplate(template);
+    setInitialXml(template.bpmn_xml);
     setShowBpmnEditor(true);
   };
 
+  const handleEditProcess = async (process: Process) => {
+    console.log('🔍 handleEditProcess called with process:', process);
+    console.log('🔍 Process ID:', process.id || (process as any)._id);
+    console.log('🔍 Process name:', process.name);
+    console.log('🔍 BPMN XML length:', process.bpmn_xml?.length || 0);
+    console.log('🔍 BPMN XML preview:', process.bpmn_xml?.substring(0, 200) || 'NO XML');
+    
+    try {
+      // If the process doesn't have bpmn_xml (summary data), fetch the full process
+      if (!process.bpmn_xml) {
+        console.log('🔍 Process missing BPMN XML, fetching full process data...');
+        const processId = process.id || (process as any)._id || (process as any).process_id;
+        if (!processId) {
+          throw new Error('Cannot determine process ID to fetch full data');
+        }
+        
+        console.log('🔍 Fetching full process with ID:', processId);
+        const response = await processApiService.getProcess(processId);
+        console.log('🔍 Get process response:', response);
+        
+        if (response.data) {
+          console.log('✅ Full process data fetched');
+          console.log('📄 Retrieved BPMN XML length:', response.data.bpmn_xml?.length || 0);
+          console.log('📄 Retrieved BPMN XML preview:', response.data.bpmn_xml?.substring(0, 200) || 'NO XML');
+          
+          setSelectedProcess(response.data);
+          setProcessName(response.data.name);
+          setInitialXml(response.data.bpmn_xml || '');
+        } else {
+          throw new Error(response.error || 'Failed to fetch process data');
+        }
+      } else {
+        // Process already has bpmn_xml data
+        console.log('✅ Process already has BPMN XML data');
+        setSelectedProcess(process);
+        setProcessName(process.name);
+        setInitialXml(process.bpmn_xml);
+      }
+      
+      setShowBpmnEditor(true);
+      setIsDirty(false);
+    } catch (err) {
+      console.log('❌ Error loading process for editing:', err);
+      toast({
+        title: 'Error Loading Process',
+        description: err instanceof Error ? err.message : 'Failed to load process data.',
+        variant: 'destructive',
+      });
+    }
+  };
+
   const handleSaveProcess = async (xml: string) => {
+    console.log('🔍 handleSaveProcess called with XML length:', xml.length);
+    console.log('� XML being saved:', xml.substring(0, 200) + '...');
+    console.log('full xml', xml);
+    console.log('�🔍 selectedProcess:', selectedProcess);
+    console.log('🔍 processName:', processName);
+    
     if (!processName.trim()) {
       toast({
         title: 'Validation Error',
@@ -132,31 +192,82 @@ export default function ModellingPage() {
     }
 
     try {
-      const processData: ProcessCreate = {
-        name: processName,
-        description: `Process created from BPMN editor`,
-        bpmn_xml: xml,
-        version: "1.0.0",
-        category: "General",
-        tags: ["bpmn", "workflow"],
-        metadata: {},
-        created_by: "current_user",
-        tenant_id: "default"
-      };
+      if (selectedProcess) {
+        // Update existing process
+        const id = selectedProcess.id || (selectedProcess as any)._id || (selectedProcess as any).process_id;
+        console.log('🔍 Updating process with ID:', id);
+        
+        if (!id) {
+          throw new Error('Cannot determine process ID for update');
+        }
 
-      const response = await processApiService.createProcess(processData, "current_user");
-      if (response.data) {
-        toast({
-          title: 'Success',
-          description: 'Process saved successfully!',
-        });
-        setIsDirty(false);
-        setShowBpmnEditor(false);
-        loadData(); // Refresh the list
+        const updateData: ProcessUpdate = {
+          name: processName,
+          description: `Process updated from BPMN editor`,
+          bpmn_xml: xml,
+          version: "1.0.0",
+          category: "General",
+          tags: ["bpmn", "workflow"],
+          metadata: {},
+        };
+
+        console.log('🔍 Calling updateProcess API...');
+        console.log('📄 Update data BPMN XML length:', updateData.bpmn_xml?.length);
+        const response = await processApiService.updateProcess(id, updateData);
+        console.log('🔍 Update response:', response);
+        
+        if (response.data) {
+          console.log('✅ Process updated successfully');
+          toast({
+            title: 'Success',
+            description: 'Process updated successfully!',
+          });
+          // Update the selectedProcess with the new data
+          setSelectedProcess(response.data);
+        } else {
+          console.log('❌ Update failed:', response.error);
+          throw new Error(response.error || 'Failed to update process');
+        }
       } else {
-        throw new Error(response.error || 'Failed to save process');
+        // Create new process
+        console.log('🔍 Creating new process');
+        const processData: ProcessCreate = {
+          name: processName,
+          description: `Process created from BPMN editor`,
+          bpmn_xml: xml,
+          version: "1.0.0",
+          category: "General",
+          tags: ["bpmn", "workflow"],
+          metadata: {},
+          created_by: "current_user",
+          tenant_id: "default"
+        };
+
+        console.log('🔍 Calling createProcess API...');
+        console.log('📄 Create data BPMN XML length:', processData.bpmn_xml.length);
+        const response = await processApiService.createProcess(processData, "current_user");
+        console.log('🔍 Create response:', response);
+        
+        if (response.data) {
+          console.log('✅ Process created successfully');
+          toast({
+            title: 'Success',
+            description: 'Process saved successfully!',
+          });
+          // Set the selectedProcess to the newly created process for future updates
+          setSelectedProcess(response.data);
+        } else {
+          console.log('❌ Create failed:', response.error);
+          throw new Error(response.error || 'Failed to save process');
+        }
       }
+
+      setIsDirty(false);
+      // DON'T close the editor automatically - let user decide when to close
+      // setShowBpmnEditor(false);
+      loadData(); // Refresh the list in background
     } catch (err) {
+      console.log('❌ Save process error:', err);
       toast({
         title: 'Error Saving Process',
         description: err instanceof Error ? err.message : 'An unknown error occurred.',
@@ -264,7 +375,7 @@ export default function ModellingPage() {
             onSave={handleSaveProcess}
             onClose={() => setShowBpmnEditor(false)}
             autoCreateDiagram={!selectedTemplate} // Auto-create when not using template
-            initialXml={selectedTemplate?.bpmn_xml}
+            initialXml={initialXml}
             onDirtyChange={setIsDirty}
             isDirty={isDirty}
           />
@@ -405,7 +516,14 @@ export default function ModellingPage() {
                     <tbody className="bg-white divide-y divide-gray-200">
                       {processes.map((process, idx) => (
                         <tr key={process.id || process.process_id || `${process.name}-${idx}` }>
-                          <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{process.name}</td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
+                            <button
+                              onClick={() => handleEditProcess(process)}
+                              className="text-blue-600 hover:text-blue-700 underline"
+                            >
+                              {process.name}
+                            </button>
+                          </td>
                           <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{process.description}</td>
                           <td className="px-6 py-4 whitespace-nowrap">
                             <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${

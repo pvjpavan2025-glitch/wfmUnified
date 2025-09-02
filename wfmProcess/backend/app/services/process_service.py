@@ -60,6 +60,8 @@ class ProcessService:
                 process_doc = await self.db.processes.find_one({"process_id": process_id})
             
             if process_doc:
+                # Convert ObjectId to string for Pydantic model
+                process_doc["_id"] = str(process_doc["_id"])
                 return Process(**process_doc)
             return None
             

@@ -249,6 +249,7 @@ export default function ModellingPage() {
           <BpmnModelerComponent
             onSave={handleSaveProcess}
             onClose={() => setShowBpmnEditor(false)}
+            autoCreateDiagram={!selectedTemplate} // Auto-create when not using template
             initialXml={selectedTemplate?.bpmn_xml}
             onDirtyChange={setIsDirty}
             isDirty={isDirty}

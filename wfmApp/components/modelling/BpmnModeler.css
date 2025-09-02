@@ -199,3 +199,12 @@
     padding: 6px 12px;
   }
 }
+
+/* BPMN canvas container constraints to prevent layers from spilling out */
+.bpmn-canvas-container {
+  position: relative; /* contain absolutely positioned bpmn-js layers */
+  width: 100%;
+  height: 100%;
+  overflow: hidden; /* hide any overflow from misplaced layers */
+  min-height: 480px; /* sensible default to avoid zero-height during layout */
+}

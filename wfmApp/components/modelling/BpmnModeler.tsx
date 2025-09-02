@@ -9,6 +9,7 @@ import {
 import ColorPickerModule from 'bpmn-js-color-picker';
 import camundaModdleDescriptor from 'camunda-bpmn-moddle/resources/camunda.json';
 import MinimapModule from 'diagram-js-minimap';
+import { useBpmnModelerSafe } from '@/hooks/useBpmnModelerSafe';
 
 import 'bpmn-js/dist/assets/diagram-js.css';
 import 'bpmn-js/dist/assets/bpmn-font/css/bpmn.css';
@@ -35,13 +36,15 @@ const BpmnModelerComponent: React.FC<BpmnModelerProps> = ({
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const propertiesPanelRef = useRef<HTMLDivElement>(null);
-    const modelerRef = useRef<BpmnModeler | null>(null);
+  const minimapRef = useRef<HTMLDivElement>(null); // Add minimap container ref
+  const modelerRef = useRef<BpmnModeler | null>(null);
   const [xml, setXml] = useState<string>(initialXml || '');
   const [error, setError] = useState<string>('');
   const [isLoading, setIsLoading] = useState(true);
   const [selectedElement, setSelectedElement] = useState<any>(null);
   const [executionStatus, setExecutionStatus] = useState<string>('');
   const [showTransactionBoundaries, setShowTransactionBoundaries] = useState<boolean>(false);
+  const [showMinimap, setShowMinimap] = useState<boolean>(true); // Add minimap visibility state
   const [showImportDialog, setShowImportDialog] = useState<boolean>(false);
   const [importUrl, setImportUrl] = useState<string>('');
   const [isImporting, setIsImporting] = useState<boolean>(false);
@@ -49,39 +52,116 @@ const BpmnModelerComponent: React.FC<BpmnModelerProps> = ({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [toast, setToast] = useState<{message: string, type: 'success' | 'error' | 'info'} | null>(null);
 
+  // Use the safe BPMN modeler hook
+  const {
+    initializeModelerSafely,
+    importXmlSafely,
+    createDiagramSafely,
+    isModelerReady,
+    zoomSafely,
+    saveXmlSafely
+  } = useBpmnModelerSafe();
+
+
+
 
   useEffect(() => {
     if (!containerRef.current || !propertiesPanelRef.current) return;
 
-    let newModeler: BpmnModeler | null = null;
+  let newModeler: BpmnModeler | null = null;
+  let _resizeObserver: ResizeObserver | null = null;
 
     const initializeModeler = async () => {
-      try {
-        setIsLoading(true);
-        setError('');
+      // Wait for the container to have a computed size. This avoids initializing
+      // bpmn-js while the canvas has 0x0 size (common with flex layouts / HMR),
+      // which can cause the renderer/palette to compute positions incorrectly.
+      const waitForContainerLayout = (el: HTMLElement, timeout = 3000) => {
+        return new Promise<void>((resolve) => {
+          try {
+            const rect = el.getBoundingClientRect();
+            if (rect.width > 0 && rect.height > 0) return resolve();
 
-        // Create a new BPMN modeler instance with enhanced features
-        newModeler = new BpmnModeler({
-          container: containerRef.current!,
-          propertiesPanel: {
-            parent: propertiesPanelRef.current!
-          },
-          additionalModules: [
+            const ro = new ResizeObserver(() => {
+              const r = el.getBoundingClientRect();
+              if (r.width > 0 && r.height > 0) {
+                ro.disconnect();
+                resolve();
+              }
+            });
+
+            ro.observe(el);
+
+            // Fallback: resolve after timeout even if size didn't change to avoid
+            // hanging initialization in edge cases.
+            setTimeout(() => {
+              try { ro.disconnect(); } catch (e) { /* noop */ }
+              resolve();
+            }, timeout);
+          } catch (e) {
+            // If anything goes wrong, don't block initialization.
+            resolve();
+          }
+        });
+      };
+
+      // Await a stable container size before continuing.
+      if (containerRef.current) {
+        await waitForContainerLayout(containerRef.current, 2500);
+      }
+      try {
+        // Global pre-cleanup: if another modeler was left running, destroy it
+        try {
+          const existing = (window as any).__wfm_bpmn_modeler_active as BpmnModeler | undefined;
+          if (existing && typeof existing.destroy === 'function') {
+            console.log('🧹 Destroying previously active global BPMN modeler');
+            try { existing.destroy(); } catch (e) { console.warn('Error destroying existing global modeler', e); }
+            delete (window as any).__wfm_bpmn_modeler_active;
+          }
+        } catch (e) {
+          console.warn('⚠️ Global pre-cleanup check failed:', e);
+        }
+
+        // Remove any dangling diagram DOM nodes not belonging to our containers
+        try {
+          const selectors = ['.djs-container', '.bpmn-js', '.diagram-js', '.djs-minimap', '.bpmn-js-minimap'];
+          selectors.forEach(sel => {
+            document.querySelectorAll(sel).forEach((el) => {
+              if (!containerRef.current?.contains(el) && !propertiesPanelRef.current?.contains(el) && !minimapRef.current?.contains(el)) {
+                // Only remove if element is outside our intended containers
+                (el as HTMLElement).remove();
+                console.log('🧹 Removed dangling diagram element', sel);
+              }
+            });
+          });
+        } catch (e) {
+          console.warn('⚠️ Dangling DOM cleanup failed:', e);
+        }
+        // Initialize modeler safely using the hook
+        newModeler = await initializeModelerSafely(
+          containerRef.current!,
+          propertiesPanelRef.current!,
+          showMinimap ? minimapRef.current : null, // Pass minimap container only if visible
+          [
             BpmnPropertiesPanelModule,
             BpmnPropertiesProviderModule,
             CamundaPlatformPropertiesProviderModule,
             ColorPickerModule,
-            MinimapModule
+            ...(showMinimap ? [MinimapModule] : []) // Include MinimapModule only if minimap is shown
           ],
-          moddleExtensions: {
+          {
             camunda: camundaModdleDescriptor
-          }
-        });
+          },
+          !!initialXml // Skip initial diagram creation if we have XML to import
+        );
 
-        // Wait for the modeler to be fully ready and ensure DOM is mounted
-        await new Promise(resolve => setTimeout(resolve, 1000));
+        if (!newModeler) {
+          throw new Error('Failed to create modeler instance');
+        }
 
-        // Set up event listeners
+  // Record active modeler globally so other instances can detect and cleanup
+  try { (window as any).__wfm_bpmn_modeler_active = newModeler; } catch (e) { /* ignore */ }
+
+        // Set up event listeners AFTER canvas is ready
         const eventBus = newModeler.get('eventBus') as any;
         
         // Listen for element selection changes
@@ -94,55 +174,68 @@ const BpmnModelerComponent: React.FC<BpmnModelerProps> = ({
           }
         });
 
-        // Set the modeler ref
-        modelerRef.current = newModeler;
-
         // Set up command stack listener for dirty state
         eventBus.on('commandStack.changed', () => {
           onDirtyChange(true);
         });
+
+        console.log('✅ Event listeners attached successfully');
+
+        // Set the modeler ref
+        modelerRef.current = newModeler;
+        console.log('✅ Modeler ref set successfully');
+        // Ensure the viewport fits the canvas after initialization
+        try {
+          await zoomSafely(newModeler, 'fit-viewport');
+        } catch (e) {
+          // best-effort only
+          console.debug('Could not fit viewport immediately after init', e);
+        }
+        // Refit viewport when container resizes (debounced)
+        try {
+          if (containerRef.current) {
+            let raf = 0;
+            _resizeObserver = new ResizeObserver(() => {
+              if (raf) cancelAnimationFrame(raf);
+              raf = requestAnimationFrame(() => {
+                try { zoomSafely(newModeler!, 'fit-viewport'); } catch (e) { /* noop */ }
+              });
+            });
+            _resizeObserver.observe(containerRef.current);
+          }
+        } catch (e) {
+          console.debug('ResizeObserver setup failed', e);
+        }
         
         // Handle initial content based on props
         if (initialXml) {
-          // Import initial XML if provided
-          await (newModeler as any).importXML(initialXml);
-          setTimeout(() => {
-            const canvas = newModeler!.get('canvas') as any;
-            if (canvas && typeof canvas.zoom === 'function') {
-              canvas.zoom('fit-viewport');
-            }
-          }, 200);
+          console.log('📄 Loading initial XML...');
+          await importXmlSafely(newModeler, initialXml, 'initial-load');
           onDirtyChange(false);
         } else if (autoCreateDiagram) {
-          // Auto-create a new diagram when requested
-          await (newModeler as any).createDiagram();
-          setTimeout(() => {
-            const canvas = newModeler!.get('canvas') as any;
-            if (canvas && typeof canvas.zoom === 'function') {
-              canvas.zoom('fit-viewport');
-            }
-          }, 200);
-          const { xml: newXml } = await (newModeler as any).saveXML({ format: true });
-          setXml(newXml || '');
+          console.log('🆕 Auto-creating new diagram...');
+          const newXml = await createDiagramSafely(newModeler);
+          setXml(newXml);
           onDirtyChange(false);
         }
 
         setError('');
+        console.log('🎉 BPMN modeler initialization completed successfully');
 
-        // Check for URL parameter for auto-import
+        // Check for URL parameter for auto-import (with longer delay for safety)
         const urlParams = new URLSearchParams(window.location.search);
         const autoImportUrl = urlParams.get('url');
         if (autoImportUrl) {
           setImportUrl(decodeURIComponent(autoImportUrl));
-          // Auto-import after modeler is ready
+          console.log('🔗 Auto-import URL detected, scheduling import...');
           setTimeout(() => {
             handleAutoImport(decodeURIComponent(autoImportUrl), newModeler!);
-          }, 2000); // Give more time for full initialization
+          }, 3000); // Longer delay for auto-import safety
         }
 
       } catch (err) {
-        console.error('Error initializing BPMN modeler:', err);
-        setError('Failed to initialize BPMN modeler');
+        console.error('💥 BPMN modeler initialization failed:', err);
+        setError(`Initialization failed: ${err instanceof Error ? err.message : 'Unknown error'}`);
       } finally {
         setIsLoading(false);
       }
@@ -151,11 +244,50 @@ const BpmnModelerComponent: React.FC<BpmnModelerProps> = ({
     initializeModeler();
 
     return () => {
-      if (newModeler) {
-        newModeler.destroy();
+      // Destroy the modeler instance and clean up any leftover DOM
+      try {
+        if (newModeler && typeof newModeler.destroy === 'function') {
+          console.log('🧹 Cleaning up BPMN modeler (local)...');
+          try { newModeler.destroy(); } catch (destroyErr) { console.warn('⚠️ Error during modeler cleanup:', destroyErr); }
+        }
+      } catch (e) {
+        console.warn('⚠️ Error while cleaning local modeler:', e);
+      }
+
+      // Disconnect resize observer if we created one
+      try {
+        if (_resizeObserver) {
+          try { _resizeObserver.disconnect(); } catch (e) { /* noop */ }
+          _resizeObserver = null;
+        }
+      } catch (e) {
+        console.warn('⚠️ Error disconnecting resize observer:', e);
+      }
+
+      // Clear global pointer if it points to this modeler
+      try {
+        if ((window as any).__wfm_bpmn_modeler_active === newModeler) {
+          delete (window as any).__wfm_bpmn_modeler_active;
+        }
+      } catch (e) {
+        console.warn('⚠️ Could not clear global modeler ref:', e);
+      }
+
+      // Remove any dangling diagram-related DOM nodes outside our containers
+      try {
+        const selectors = ['.djs-container', '.bpmn-js', '.diagram-js', '.djs-minimap', '.bpmn-js-minimap'];
+        selectors.forEach(sel => {
+          document.querySelectorAll(sel).forEach((el) => {
+            if (!containerRef.current?.contains(el) && !propertiesPanelRef.current?.contains(el) && !minimapRef.current?.contains(el)) {
+              (el as HTMLElement).remove();
+            }
+          });
+        });
+      } catch (e) {
+        console.warn('⚠️ Error removing dangling DOM on cleanup:', e);
       }
     };
-  }, []);
+  }, [initializeModelerSafely, importXmlSafely, createDiagramSafely, autoCreateDiagram, initialXml, onDirtyChange, showMinimap]);
 
   // Separate effect to handle XML changes without reinitializing modeler
   useEffect(() => {
@@ -165,22 +297,14 @@ const BpmnModelerComponent: React.FC<BpmnModelerProps> = ({
       try {
         setIsLoading(true);
         setError('');
+        console.log('📥 Importing XML content...');
         
-        await (modelerRef.current as any).importXML(xml);
-        
-        // Zoom to fit with delay
-        setTimeout(() => {
-          if (modelerRef.current) {
-            const canvas = (modelerRef.current as any).get('canvas');
-            if (canvas && typeof canvas.zoom === 'function') {
-              canvas.zoom('fit-viewport');
-            }
-          }
-        }, 200);
-        
+        await importXmlSafely(modelerRef.current!, xml, 'xml-change');
         onDirtyChange(false);
+        console.log('✅ XML content imported successfully');
+        
       } catch (err: any) {
-        console.error('Error importing XML:', err);
+        console.error('❌ Error importing XML content:', err);
         setError(`Failed to import diagram: ${err.message}`);
       } finally {
         setIsLoading(false);
@@ -188,7 +312,7 @@ const BpmnModelerComponent: React.FC<BpmnModelerProps> = ({
     };
 
     importXmlContent();
-  }, [xml, initialXml, onDirtyChange]);
+  }, [xml, initialXml, onDirtyChange, importXmlSafely]);
 
 
   // Toast notification helper
@@ -276,11 +400,10 @@ const BpmnModelerComponent: React.FC<BpmnModelerProps> = ({
   const handleSave = async () => {
     if (!modelerRef.current) return;
     try {
-      const { xml: savedXml } = await modelerRef.current.saveXML({ format: true });
-      const xmlString = savedXml || '';
-      setXml(xmlString);
+      const savedXml = await saveXmlSafely(modelerRef.current, true);
+      setXml(savedXml);
       if (onSave) {
-        onSave(xmlString);
+        onSave(savedXml);
       }
       onDirtyChange(false);
       showToast('Workflow changes ready to be saved.', 'success');
@@ -314,30 +437,16 @@ const BpmnModelerComponent: React.FC<BpmnModelerProps> = ({
     try {
       setIsLoading(true);
       setError('');
+      console.log('🆕 Creating new diagram via button...');
       
-      // Wait a moment to ensure modeler is ready
-      await new Promise(resolve => setTimeout(resolve, 100));
-      
-      // Create a new diagram using the createDiagram method
-      await (modelerRef.current as any).createDiagram();
-      
-      // Small delay to ensure proper rendering before zoom
-      setTimeout(() => {
-        if (modelerRef.current) {
-          const canvas = (modelerRef.current as any).get('canvas');
-          if (canvas && typeof canvas.zoom === 'function') {
-            canvas.zoom('fit-viewport');
-          }
-        }
-      }, 200);
-      
-      const { xml: newXml } = await (modelerRef.current as any).saveXML({ format: true });
-      setXml(newXml || '');
+      const newXml = await createDiagramSafely(modelerRef.current);
+      setXml(newXml);
       onDirtyChange(false);
       showToast('New diagram created successfully', 'success');
-      console.log('New diagram created');
+      console.log('✅ New diagram created via button');
+      
     } catch (err: any) {
-      console.error('Error creating new diagram:', err);
+      console.error('❌ Error creating new diagram via button:', err);
       setError(`Failed to create new diagram: ${err.message}`);
       showToast('Failed to create new diagram', 'error');
     } finally {
@@ -605,7 +714,7 @@ const BpmnModelerComponent: React.FC<BpmnModelerProps> = ({
   const handleAutoImport = async (url: string, modelerInstance: BpmnModeler) => {
     if (!url.trim() || !modelerInstance) return;
 
-    console.log('Auto-importing BPMN from URL:', url);
+    console.log('🔗 Auto-importing BPMN from URL:', url);
     
     try {
       // Validate URL format
@@ -637,63 +746,16 @@ const BpmnModelerComponent: React.FC<BpmnModelerProps> = ({
         throw new Error('Response does not appear to be valid XML content');
       }
 
-      console.log('Auto-import: BPMN XML fetched successfully, importing...');
+      console.log('🔗 Auto-import: BPMN XML fetched successfully, importing safely...');
       
-      // Create a temporary modeler for import without problematic modules
-      let tempModeler: BpmnModeler | null = null;
+      // Use our safe import function
+      await importXmlSafely(modelerInstance, xmlData, 'auto-import');
+      setXml(xmlData);
       
-      try {
-        // Create a minimal modeler without properties panel for import
-        tempModeler = new BpmnModeler({
-          container: containerRef.current!,
-          additionalModules: [
-            // Only include essential modules, exclude properties panel
-            ColorPickerModule,
-            MinimapModule
-          ],
-          moddleExtensions: {
-            camunda: camundaModdleDescriptor
-          }
-        });
-        
-        // Import using the temporary modeler
-        await (tempModeler as any).importXML(xmlData);
-        console.log('Auto-import: BPMN XML imported using temp modeler');
-        
-        // Get the imported XML from temp modeler
-        const { xml: importedXml } = await tempModeler.saveXML({ format: true });
-        
-        // Destroy temp modeler
-        tempModeler.destroy();
-        tempModeler = null;
-        
-        // Now import into the main modeler (which should work since XML is normalized)
-        await (modelerInstance as any).importXML(importedXml);
-        console.log('Auto-import: BPMN XML transferred to main modeler successfully');
-        
-        // Save the XML to state
-        setXml(importedXml || '');
-        
-      } catch (importError) {
-        // Clean up temp modeler if it exists
-        if (tempModeler) {
-          tempModeler.destroy();
-        }
-        throw importError;
-      }
-      
-      // Zoom to fit the viewport with delay for proper rendering
-      setTimeout(() => {
-        const canvas = (modelerInstance as any).get('canvas');
-        if (canvas && typeof canvas.zoom === 'function') {
-          canvas.zoom('fit-viewport');
-        }
-      }, 200);
-      
-      console.log('Auto-import: BPMN imported successfully');
+      console.log('✅ Auto-import: BPMN imported successfully');
       
     } catch (error) {
-      console.error('Error auto-importing BPMN from URL:', error);
+      console.error('❌ Error auto-importing BPMN from URL:', error);
       // Don't show alert for auto-import failures, just log
     }
   };
@@ -742,6 +804,17 @@ const BpmnModelerComponent: React.FC<BpmnModelerProps> = ({
             disabled={isLoading}
           >
             Import
+          </button>
+          <button
+            onClick={() => setShowMinimap(!showMinimap)}
+            className={`px-4 py-2 rounded text-sm font-medium ${
+              showMinimap 
+                ? 'bg-indigo-600 hover:bg-indigo-700 text-white' 
+                : 'bg-gray-200 hover:bg-gray-300 text-gray-700'
+            }`}
+            disabled={isLoading}
+          >
+            {showMinimap ? 'Hide' : 'Show'} Minimap
           </button>
           <button
             onClick={handleDownload}
@@ -888,9 +961,17 @@ const BpmnModelerComponent: React.FC<BpmnModelerProps> = ({
           )}
           <div
             ref={containerRef}
-            className="w-full h-full border-r border-gray-200"
+            className="bpmn-canvas-container w-full h-full border-r border-gray-200"
             style={{ minHeight: '600px' }}
           />
+          {/* Minimap Container */}
+          {showMinimap && (
+            <div
+              ref={minimapRef}
+              className="absolute bottom-4 right-4 w-48 h-32 bg-white border border-gray-300 shadow-lg rounded-md overflow-hidden"
+              style={{ zIndex: 10 }}
+            />
+          )}
         </div>
 
         {/* Properties Panel */}

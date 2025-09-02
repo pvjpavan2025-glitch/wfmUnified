@@ -102,6 +102,20 @@ export interface TemplateCreate {
   tenant_id: string;
 }
 
+export interface BpmnTempStorageRequest {
+  xml: string;
+  filename: string;
+  session_id: string;
+  overwrite?: boolean;
+}
+
+export interface BpmnTempStorageResponse {
+  success: boolean;
+  key?: string;
+  message: string;
+  timestamp: string;
+}
+
 export interface ApiResponse<T> {
   data?: T;
   message?: string;
@@ -314,6 +328,16 @@ class ProcessApiService {
 
   async deleteTemplate(templateId: string): Promise<ApiResponse<{ message: string }>> {
     return this.request<{ message: string }>(`/api/v1/processes/templates/${templateId}`);
+  }
+
+  // BPMN Temporary Storage
+  async storeBpmnTemporarily(
+    storageData: BpmnTempStorageRequest
+  ): Promise<ApiResponse<BpmnTempStorageResponse>> {
+    return this.request<BpmnTempStorageResponse>(`/api/v1/bpmn-temp/store`, {
+      method: 'POST',
+      body: JSON.stringify(storageData),
+    });
   }
 
   // BPMN Validation

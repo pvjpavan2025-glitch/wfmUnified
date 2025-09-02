@@ -17,6 +17,8 @@ import {
   PencilIcon
 } from '@heroicons/react/24/outline';
 import { processApiService, Process, ProcessInstance, Template, ProcessCreate } from '@/services/processApi';
+import { useToast } from '@/hooks/use-toast';
+import { ProcessNameEditor } from '../../components/modelling/ProcessNameEditor';
 
 // Dynamic imports for components
 const BpmnModelerComponent = dynamic(
@@ -28,10 +30,13 @@ const BpmnModelerComponent = dynamic(
 );
 
 export default function ModellingPage() {
+  const { toast } = useToast();
   const [activeTab, setActiveTab] = useState<'new-process' | 'manage-processes' | 'instances' | 'templates'>('new-process');
   const [showBpmnEditor, setShowBpmnEditor] = useState(false);
   const [selectedProcess, setSelectedProcess] = useState<Process | null>(null);
   const [selectedTemplate, setSelectedTemplate] = useState<Template | null>(null);
+  const [processName, setProcessName] = useState('New Process');
+  const [isDirty, setIsDirty] = useState(false);
   
   // State for real data
   const [processes, setProcesses] = useState<Process[]>([]);
@@ -105,23 +110,28 @@ export default function ModellingPage() {
   };
 
   const handleCreateNewProcess = () => {
+    setProcessName('New Process');
+    setSelectedTemplate(null);
     setShowBpmnEditor(true);
   };
 
   const handleCreateFromTemplate = (template: Template) => {
+    setProcessName(template.name);
     setSelectedTemplate(template);
     setShowBpmnEditor(true);
   };
 
   const handleSaveProcess = async (xml: string) => {
-    try {
-      // Prompt user for process name
-      const processName = prompt('Enter process name:');
-      if (!processName) {
-        alert('Process name is required');
-        return;
-      }
+    if (!processName.trim()) {
+      toast({
+        title: 'Validation Error',
+        description: 'Process name cannot be empty.',
+        variant: 'destructive',
+      });
+      return;
+    }
 
+    try {
       const processData: ProcessCreate = {
         name: processName,
         description: `Process created from BPMN editor`,
@@ -136,14 +146,22 @@ export default function ModellingPage() {
 
       const response = await processApiService.createProcess(processData, "current_user");
       if (response.data) {
-        alert('Process saved successfully!');
+        toast({
+          title: 'Success',
+          description: 'Process saved successfully!',
+        });
+        setIsDirty(false);
         setShowBpmnEditor(false);
         loadData(); // Refresh the list
       } else {
-        alert(`Failed to save process: ${response.error}`);
+        throw new Error(response.error || 'Failed to save process');
       }
     } catch (err) {
-      alert(`Error saving process: ${err instanceof Error ? err.message : 'Unknown error'}`);
+      toast({
+        title: 'Error Saving Process',
+        description: err instanceof Error ? err.message : 'An unknown error occurred.',
+        variant: 'destructive',
+      });
     }
   };
 
@@ -152,13 +170,24 @@ export default function ModellingPage() {
       try {
         const response = await processApiService.deleteProcess(processId);
         if (response.data) {
-          alert('Process deleted successfully!');
+          toast({
+            title: 'Success',
+            description: 'Process deleted successfully!',
+          });
           loadData(); // Refresh the list
         } else {
-          alert(`Failed to delete process: ${response.error}`);
+          toast({
+            title: 'Error',
+            description: `Failed to delete process: ${response.error}`,
+            variant: 'destructive',
+          });
         }
       } catch (err) {
-        alert(`Error deleting process: ${err instanceof Error ? err.message : 'Unknown error'}`);
+        toast({
+          title: 'Error',
+          description: `Error deleting process: ${err instanceof Error ? err.message : 'Unknown error'}`,
+          variant: 'destructive',
+        });
       }
     }
   };
@@ -176,13 +205,24 @@ export default function ModellingPage() {
 
       const response = await processApiService.createTemplateFromProcess(process.id, templateData);
       if (response.data) {
-        alert('Template created successfully!');
+        toast({
+          title: 'Success',
+          description: 'Template created successfully!',
+        });
         loadData(); // Refresh the list
       } else {
-        alert(`Failed to create template: ${response.error}`);
+        toast({
+          title: 'Error',
+          description: `Failed to create template: ${response.error}`,
+          variant: 'destructive',
+        });
       }
     } catch (err) {
-      alert(`Error creating template: ${err instanceof Error ? err.message : 'Unknown error'}`);
+      toast({
+        title: 'Error',
+        description: `Error creating template: ${err instanceof Error ? err.message : 'Unknown error'}`,
+        variant: 'destructive',
+      });
     }
   };
 
@@ -191,9 +231,14 @@ export default function ModellingPage() {
       <AppShell title="FSM Process Designer" subtitle="Create or edit business process">
         <div className="bg-white shadow rounded-lg p-6">
           <div className="flex items-center justify-between mb-6">
-            <h2 className="text-lg font-medium text-gray-900">
-              {selectedTemplate ? 'Create Process from Template' : 'Create New Process'}
-            </h2>
+            <ProcessNameEditor
+              name={processName}
+              onSave={(newName) => {
+                setProcessName(newName);
+                setIsDirty(true);
+              }}
+              isDirty={isDirty}
+            />
             <button
               onClick={() => setShowBpmnEditor(false)}
               className="text-gray-500 hover:text-gray-700 text-sm"
@@ -204,7 +249,9 @@ export default function ModellingPage() {
           <BpmnModelerComponent
             onSave={handleSaveProcess}
             onClose={() => setShowBpmnEditor(false)}
-            autoCreateDiagram={!selectedTemplate} // Auto-create for new processes, not for templates
+            initialXml={selectedTemplate?.bpmn_xml}
+            onDirtyChange={setIsDirty}
+            isDirty={isDirty}
           />
         </div>
       </AppShell>
@@ -346,11 +393,11 @@ export default function ModellingPage() {
                           <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{process.name}</td>
                           <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{process.description}</td>
                           <td className="px-6 py-4 whitespace-nowrap">
-                                                         <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
-                               process.status === 'active' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
-                             }`}>
-                               {process.status === 'active' ? 'Active' : 'Inactive'}
-                             </span>
+                            <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
+                              process.status === 'active' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
+                            }`}>
+                              {process.status === 'active' ? 'Active' : 'Inactive'}
+                            </span>
                           </td>
                           <td className="px-6 py-4 whitespace-nowrap text-sm font-medium space-x-2">
                             <button
@@ -409,7 +456,7 @@ export default function ModellingPage() {
                     <tbody className="bg-white divide-y divide-gray-200">
                       {instances.map((instance, idx) => (
                         <tr key={instance.id || `${instance.process_id}-${instance.started_at}-${idx}` }>
-                                                     <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{instance.id}</td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{instance.id}</td>
                           <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{instance.process_name}</td>
                           <td className="px-6 py-4 whitespace-nowrap">
                             <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
@@ -469,7 +516,7 @@ export default function ModellingPage() {
                           <div className="flex items-center space-x-2 text-xs text-gray-500">
                             <span>Usage: {template.usage_count}</span>
                             <span>•</span>
-                                                         <span>Template</span>
+                            <span>Template</span>
                           </div>
                         </div>
                         <button

@@ -1,4 +1,5 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState, useCallback } from 'react';
+import { processApiService } from '@/services/processApi';
 import BpmnModeler from 'bpmn-js/lib/Modeler';
 import {
   BpmnPropertiesPanelModule,
@@ -19,13 +20,23 @@ interface BpmnModelerProps {
   onSave?: (xml: string) => void;
   onClose?: () => void;
   autoCreateDiagram?: boolean; // Auto-create diagram when requested
+  initialXml?: string;
+  onDirtyChange: (isDirty: boolean) => void;
+  isDirty: boolean;
 }
 
-const BpmnModelerComponent: React.FC<BpmnModelerProps> = ({ onSave, onClose, autoCreateDiagram = false }) => {
+const BpmnModelerComponent: React.FC<BpmnModelerProps> = ({ 
+  onSave, 
+  onClose, 
+  autoCreateDiagram, 
+  initialXml, 
+  onDirtyChange, 
+  isDirty 
+}) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const propertiesPanelRef = useRef<HTMLDivElement>(null);
-  const [modeler, setModeler] = useState<BpmnModeler | null>(null);
-  const [xml, setXml] = useState<string>('');
+    const modelerRef = useRef<BpmnModeler | null>(null);
+  const [xml, setXml] = useState<string>(initialXml || '');
   const [error, setError] = useState<string>('');
   const [isLoading, setIsLoading] = useState(true);
   const [selectedElement, setSelectedElement] = useState<any>(null);
@@ -36,8 +47,8 @@ const BpmnModelerComponent: React.FC<BpmnModelerProps> = ({ onSave, onClose, aut
   const [isImporting, setIsImporting] = useState<boolean>(false);
   const [importMethod, setImportMethod] = useState<'url' | 'file'>('url');
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const [shouldAutoCreate, setShouldAutoCreate] = useState<boolean>(false);
   const [toast, setToast] = useState<{message: string, type: 'success' | 'error' | 'info'} | null>(null);
+
 
   useEffect(() => {
     if (!containerRef.current || !propertiesPanelRef.current) return;
@@ -70,7 +81,7 @@ const BpmnModelerComponent: React.FC<BpmnModelerProps> = ({ onSave, onClose, aut
         // Wait for the modeler to be fully ready and ensure DOM is mounted
         await new Promise(resolve => setTimeout(resolve, 1000));
 
-                // Set up event listeners
+        // Set up event listeners
         const eventBus = newModeler.get('eventBus') as any;
         
         // Listen for element selection changes
@@ -83,18 +94,40 @@ const BpmnModelerComponent: React.FC<BpmnModelerProps> = ({ onSave, onClose, aut
           }
         });
 
-        // Set the modeler state - this makes it available for other functions
-        setModeler(newModeler);
-        
-        // Don't create any diagram initially - let the user create one manually
-        // This prevents the "root-0" error during initialization
-        setError('');
-        setXml('');
+        // Set the modeler ref
+        modelerRef.current = newModeler;
 
-        // Set flag for auto-creation if requested
-        if (autoCreateDiagram) {
-          setShouldAutoCreate(true);
+        // Set up command stack listener for dirty state
+        eventBus.on('commandStack.changed', () => {
+          onDirtyChange(true);
+        });
+        
+        // Handle initial content based on props
+        if (initialXml) {
+          // Import initial XML if provided
+          await (newModeler as any).importXML(initialXml);
+          setTimeout(() => {
+            const canvas = newModeler!.get('canvas') as any;
+            if (canvas && typeof canvas.zoom === 'function') {
+              canvas.zoom('fit-viewport');
+            }
+          }, 200);
+          onDirtyChange(false);
+        } else if (autoCreateDiagram) {
+          // Auto-create a new diagram when requested
+          await (newModeler as any).createDiagram();
+          setTimeout(() => {
+            const canvas = newModeler!.get('canvas') as any;
+            if (canvas && typeof canvas.zoom === 'function') {
+              canvas.zoom('fit-viewport');
+            }
+          }, 200);
+          const { xml: newXml } = await (newModeler as any).saveXML({ format: true });
+          setXml(newXml || '');
+          onDirtyChange(false);
         }
+
+        setError('');
 
         // Check for URL parameter for auto-import
         const urlParams = new URLSearchParams(window.location.search);
@@ -103,9 +136,7 @@ const BpmnModelerComponent: React.FC<BpmnModelerProps> = ({ onSave, onClose, aut
           setImportUrl(decodeURIComponent(autoImportUrl));
           // Auto-import after modeler is ready
           setTimeout(() => {
-            if (newModeler) {
-              handleAutoImport(decodeURIComponent(autoImportUrl), newModeler);
-            }
+            handleAutoImport(decodeURIComponent(autoImportUrl), newModeler!);
           }, 2000); // Give more time for full initialization
         }
 
@@ -126,38 +157,39 @@ const BpmnModelerComponent: React.FC<BpmnModelerProps> = ({ onSave, onClose, aut
     };
   }, []);
 
-  // Separate effect for auto-creation after modeler is ready
+  // Separate effect to handle XML changes without reinitializing modeler
   useEffect(() => {
-    if (modeler && shouldAutoCreate && !isLoading) {
-      const createDiagramWhenReady = async () => {
-        try {
-          console.log('Auto-creating new diagram as requested...');
-          await (modeler as any).createDiagram();
-          
-          // Zoom to fit the viewport
-          const canvas = (modeler as any).get('canvas');
-          if (canvas && typeof canvas.zoom === 'function') {
-            canvas.zoom('fit-viewport');
-          }
-          
-          const { xml: newXml } = await modeler.saveXML({ format: true });
-          setXml(newXml || '');
-          console.log('Auto-created new diagram successfully');
-          
-          // Reset the flag so we don't create again
-          setShouldAutoCreate(false);
-        } catch (error) {
-          console.error('Error auto-creating diagram:', error);
-          setError('Auto-creation failed. Please use "New Diagram" button.');
-          setShouldAutoCreate(false);
-        }
-      };
+    if (!modelerRef.current || !xml || xml === initialXml) return;
 
-      // Small delay to ensure modeler is completely ready
-      const timeout = setTimeout(createDiagramWhenReady, 500);
-      return () => clearTimeout(timeout);
-    }
-  }, [modeler, shouldAutoCreate, isLoading]);
+    const importXmlContent = async () => {
+      try {
+        setIsLoading(true);
+        setError('');
+        
+        await (modelerRef.current as any).importXML(xml);
+        
+        // Zoom to fit with delay
+        setTimeout(() => {
+          if (modelerRef.current) {
+            const canvas = (modelerRef.current as any).get('canvas');
+            if (canvas && typeof canvas.zoom === 'function') {
+              canvas.zoom('fit-viewport');
+            }
+          }
+        }, 200);
+        
+        onDirtyChange(false);
+      } catch (err: any) {
+        console.error('Error importing XML:', err);
+        setError(`Failed to import diagram: ${err.message}`);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    importXmlContent();
+  }, [xml, initialXml, onDirtyChange]);
+
 
   // Toast notification helper
   const showToast = (message: string, type: 'success' | 'error' | 'info') => {
@@ -168,33 +200,27 @@ const BpmnModelerComponent: React.FC<BpmnModelerProps> = ({ onSave, onClose, aut
   // Store BPMN in Redis temporarily
   const storeBpmnInRedis = async (xml: string, filename: string) => {
     try {
-      const sessionId = sessionStorage.getItem('sessionId') || `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-      
-      const response = await fetch('http://localhost:8000/api/v1/bpmn-temp/store', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          xml,
-          filename,
-          session_id: sessionId,
-          overwrite: true
-        }),
-      });
-      
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.detail || 'Failed to store BPMN temporarily');
+      const sessionId = sessionStorage.getItem('sessionId') || `session_${Date.now()}`;
+      if (!sessionStorage.getItem('sessionId')) {
+        sessionStorage.setItem('sessionId', sessionId);
       }
-      
-      const result = await response.json();
-      showToast(`BPMN stored in Redis: ${result.message}`, 'success');
-      return result;
-    } catch (error) {
-      console.warn('Redis storage failed:', error);
-      showToast('Redis storage unavailable, using local storage', 'info');
-      
+
+      const response = await processApiService.storeBpmnTemporarily({
+        xml,
+        filename,
+        session_id: sessionId,
+        overwrite: true,
+      });
+
+      if (response.data?.success) {
+        showToast(`BPMN stored temporarily: ${response.data.message}`, 'success');
+        return response.data;
+      } else {
+        throw new Error(response.error || 'Failed to store BPMN temporarily');
+      }
+    } catch (error: any) {
+      console.warn('Temporary storage failed:', error);
+      showToast(`Storage unavailable: ${error.message}`, 'error');
       // Fallback to sessionStorage
       const key = `bpmn_temp_${filename}_${Date.now()}`;
       sessionStorage.setItem(key, xml);
@@ -209,8 +235,8 @@ const BpmnModelerComponent: React.FC<BpmnModelerProps> = ({ onSave, onClose, aut
   };
 
   const handleApplyColorTheme = (theme: string) => {
-    if (modeler && selectedElement) {
-      const modeling = modeler.get('modeling') as any;
+    if (modelerRef.current && selectedElement) {
+      const modeling = modelerRef.current.get('modeling') as any;
       const colors = {
         'success': { fill: '#E8F5E8', stroke: '#388E3C' },
         'warning': { fill: '#FFF3E0', stroke: '#F57C00' },
@@ -224,8 +250,8 @@ const BpmnModelerComponent: React.FC<BpmnModelerProps> = ({ onSave, onClose, aut
   };
 
   const handleSetElementColor = (color: { fill?: string; stroke?: string }) => {
-    if (modeler && selectedElement) {
-      const modeling = modeler.get('modeling') as any;
+    if (modelerRef.current && selectedElement) {
+      const modeling = modelerRef.current.get('modeling') as any;
       modeling.setColor(selectedElement, color);
     }
   };
@@ -248,48 +274,20 @@ const BpmnModelerComponent: React.FC<BpmnModelerProps> = ({ onSave, onClose, aut
   };
 
   const handleSave = async () => {
-    if (modeler) {
-      try {
-        const { xml: savedXml } = await modeler.saveXML({ format: true });
-        const xmlString = savedXml || '';
-        setXml(xmlString);
-        
-        // Save to database via backend API instead of frontend API
-        try {
-          const response = await fetch('http://localhost:8000/save-bpmn', {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-              bpmn_xml: xmlString,
-              name: `workflow_${Date.now()}`,
-              version: "1.0.0"
-            }),
-          });
-          
-          if (response.ok) {
-            const result = await response.json();
-            console.log('BPMN saved to database:', result);
-            showToast(`Workflow saved successfully! ID: ${result.workflow_definition?.id}`, 'success');
-          } else {
-            const errorData = await response.json();
-            throw new Error(errorData.detail || 'Failed to save to database');
-          }
-        } catch (saveError) {
-          console.warn('Database save failed, using local storage:', saveError);
-          // Fallback to local storage
-          localStorage.setItem('bpmn_workflow', xmlString);
-          showToast('Workflow saved locally (database unavailable)', 'info');
-        }
-        
-        if (onSave) {
-          onSave(xmlString);
-        }
-      } catch (err) {
-        console.error('Error saving diagram:', err);
-        setError('Failed to save diagram');
+    if (!modelerRef.current) return;
+    try {
+      const { xml: savedXml } = await modelerRef.current.saveXML({ format: true });
+      const xmlString = savedXml || '';
+      setXml(xmlString);
+      if (onSave) {
+        onSave(xmlString);
       }
+      onDirtyChange(false);
+      showToast('Workflow changes ready to be saved.', 'success');
+    } catch (err: any) {
+      console.error('Error saving diagram:', err);
+      setError(`Failed to save diagram: ${err.message}`);
+      showToast(`Error saving diagram: ${err.message}`, 'error');
     }
   };
 
@@ -308,32 +306,42 @@ const BpmnModelerComponent: React.FC<BpmnModelerProps> = ({ onSave, onClose, aut
   };
 
   const handleNewDiagram = async () => {
-    if (modeler) {
-      try {
-        setIsLoading(true);
-        setError('');
-        
-        // Wait a moment to ensure modeler is ready
-        await new Promise(resolve => setTimeout(resolve, 100));
-        
-        // Create a new diagram using the createDiagram method
-        await (modeler as any).createDiagram();
-        
-        // Zoom to fit the viewport
-        const canvas = (modeler as any).get('canvas');
-        if (canvas && typeof canvas.zoom === 'function') {
-          canvas.zoom('fit-viewport');
+    if (!modelerRef.current) {
+      setError('BPMN Modeler not initialized');
+      return;
+    }
+
+    try {
+      setIsLoading(true);
+      setError('');
+      
+      // Wait a moment to ensure modeler is ready
+      await new Promise(resolve => setTimeout(resolve, 100));
+      
+      // Create a new diagram using the createDiagram method
+      await (modelerRef.current as any).createDiagram();
+      
+      // Small delay to ensure proper rendering before zoom
+      setTimeout(() => {
+        if (modelerRef.current) {
+          const canvas = (modelerRef.current as any).get('canvas');
+          if (canvas && typeof canvas.zoom === 'function') {
+            canvas.zoom('fit-viewport');
+          }
         }
-        
-        const { xml: newXml } = await (modeler as any).saveXML({ format: true });
-        setXml(newXml || '');
-        console.log('New diagram created');
-      } catch (err) {
-        console.error('Error creating new diagram:', err);
-        setError('Failed to create new diagram');
-      } finally {
-        setIsLoading(false);
-      }
+      }, 200);
+      
+      const { xml: newXml } = await (modelerRef.current as any).saveXML({ format: true });
+      setXml(newXml || '');
+      onDirtyChange(false);
+      showToast('New diagram created successfully', 'success');
+      console.log('New diagram created');
+    } catch (err: any) {
+      console.error('Error creating new diagram:', err);
+      setError(`Failed to create new diagram: ${err.message}`);
+      showToast('Failed to create new diagram', 'error');
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -430,71 +438,12 @@ const BpmnModelerComponent: React.FC<BpmnModelerProps> = ({ onSave, onClose, aut
       // Validate and normalize the BPMN XML
       const normalizedXml = validateAndNormalizeBpmnXml(xmlContent);
 
-      // Import the XML into the modeler
-      if (modeler) {
-        // Clear any existing diagram first
-        try {
-          await (modeler as any).clear();
-        } catch (clearError) {
-          console.warn('Could not clear existing diagram:', clearError);
-        }
-        
-        // Create a temporary modeler for import without problematic modules
-        let tempModeler: BpmnModeler | null = null;
-        
-        try {
-          // Create a minimal modeler without properties panel for import
-          tempModeler = new BpmnModeler({
-            container: containerRef.current!,
-            additionalModules: [
-              // Only include essential modules, exclude properties panel
-              ColorPickerModule,
-              MinimapModule
-            ],
-            moddleExtensions: {
-              camunda: camundaModdleDescriptor
-            }
-          });
-          
-          // Import using the temporary modeler
-          await (tempModeler as any).importXML(normalizedXml);
-          console.log('BPMN XML imported successfully from file using temp modeler');
-          
-          // Get the imported XML from temp modeler
-          const { xml: importedXml } = await tempModeler.saveXML({ format: true });
-          
-          // Destroy temp modeler
-          tempModeler.destroy();
-          tempModeler = null;
-          
-          // Now import into the main modeler (which should work since XML is normalized)
-          await (modeler as any).importXML(importedXml);
-          console.log('BPMN XML transferred to main modeler successfully');
-          
-          // Update the XML state
-          setXml(importedXml || '');
-          
-        } catch (importError) {
-          // Clean up temp modeler if it exists
-          if (tempModeler) {
-            tempModeler.destroy();
-          }
-          throw importError;
-        }
-        
-        // Zoom to fit the viewport
-        const canvas = (modeler as any).get('canvas');
-        if (canvas && typeof canvas.zoom === 'function') {
-          canvas.zoom('fit-viewport');
-        }
-        
-        // Close the dialog on success
-        setShowImportDialog(false);
-        setImportUrl('');
-        setImportMethod('url');
-      } else {
-        throw new Error('BPMN Modeler not initialized');
-      }
+      // Set the new XML content, which will trigger the XML import effect
+      setXml(normalizedXml);
+      showToast('BPMN diagram imported successfully!', 'success');
+      setShowImportDialog(false);
+      setImportUrl('');
+      setImportMethod('url');
 
     } catch (error) {
       console.error('Error importing BPMN from file:', error);
@@ -609,7 +558,7 @@ const BpmnModelerComponent: React.FC<BpmnModelerProps> = ({ onSave, onClose, aut
         throw new Error('The URL returned empty content');
       }
 
-      // Validate that it looks like XML
+      // Validate that the response looks like XML
       if (!xmlContent.trim().startsWith('<?xml') && !xmlContent.trim().startsWith('<')) {
         throw new Error('The URL did not return valid XML content');
       }
@@ -619,196 +568,12 @@ const BpmnModelerComponent: React.FC<BpmnModelerProps> = ({ onSave, onClose, aut
       // Validate and normalize the BPMN XML
       const normalizedXml = validateAndNormalizeBpmnXml(xmlContent);
 
-      // Import the XML into the modeler
-      if (modeler) {
-        // Properly clear the main modeler to avoid "element already exists" errors
-        try {
-          // Force clear all existing elements
-          const canvas = (modeler as any).get('canvas');
-          const elementRegistry = (modeler as any).get('elementRegistry');
-          
-          // Get all root elements and remove them
-          const rootElements = canvas.getRootElements();
-          rootElements.forEach((rootElement: any) => {
-            try {
-              canvas.removeRootElement(rootElement);
-            } catch (removeError) {
-              console.warn('Could not remove root element:', removeError);
-            }
-          });
-          
-          // Clear element registry
-          elementRegistry.clear();
-          
-        } catch (clearError) {
-          console.warn('Could not clear existing diagram:', clearError);
-          showToast('Warning: Could not fully clear existing diagram', 'info');
-        }
-        
-        // Create a temporary modeler for import without problematic modules
-        let tempModeler: BpmnModeler | null = null;
-        
-        try {
-          showToast('Importing BPMN diagram...', 'info');
-          
-          // Create a minimal modeler without properties panel for import
-          tempModeler = new BpmnModeler({
-            container: containerRef.current!,
-            additionalModules: [
-              // Only include essential modules, exclude properties panel
-              ColorPickerModule,
-              MinimapModule
-            ],
-            moddleExtensions: {
-              camunda: camundaModdleDescriptor
-            }
-          });
-          
-          // Import using the temporary modeler with proper error handling
-          try {
-            await (tempModeler as any).importXML(normalizedXml);
-            console.log('BPMN XML imported successfully from URL using temp modeler');
-          } catch (tempImportError) {
-            // Handle specific BPMN import errors
-            const errorMessage = tempImportError instanceof Error ? tempImportError.message : String(tempImportError);
-            
-            // Clean up temp modeler
-            if (tempModeler) {
-              tempModeler.destroy();
-              tempModeler = null;
-            }
-            
-            // Check for specific error types
-            if (errorMessage.includes('no diagram to display')) {
-              showToast('Invalid BPMN file: The file does not contain a valid BPMN diagram', 'error');
-              setError('Invalid BPMN file: No diagram found in the provided file');
-            } else if (errorMessage.includes('unparsable content')) {
-              showToast('Invalid BPMN file: The file contains unparsable XML content', 'error');
-              setError('Invalid BPMN file: XML content is malformed');
-            } else if (errorMessage.includes('unknown type')) {
-              showToast('Invalid BPMN file: The file contains unsupported BPMN elements', 'error');
-              setError('Invalid BPMN file: Contains unsupported elements');
-            } else {
-              showToast(`Invalid BPMN file: ${errorMessage}`, 'error');
-              setError(`Invalid BPMN file: ${errorMessage}`);
-            }
-            
-            console.error('BPMN import failed:', tempImportError);
-            
-            // Reset the import state but keep the dialog open for retry
-            setIsImporting(false);
-            return; // Exit the function, don't proceed with further processing
-          }
-          
-          // Get the imported XML from temp modeler
-          const { xml: importedXml } = await tempModeler.saveXML({ format: true });
-          
-          if (!importedXml) {
-            throw new Error('Failed to generate XML from imported diagram');
-          }
-          
-          // Store in Redis temporarily
-          await storeBpmnInRedis(importedXml, `imported_${Date.now()}.bpmn`);
-          
-          // Destroy temp modeler
-          tempModeler.destroy();
-          tempModeler = null;
-          
-          // Instead of importing into main modeler, recreate it with the imported XML
-          // This avoids the businessObject.get error completely
-          let newModelerInstance: BpmnModeler | null = null;
-          try {
-            // Destroy the current main modeler
-            if (modeler) {
-              modeler.destroy();
-            }
-            
-            // Create a fresh modeler instance
-            newModelerInstance = new BpmnModeler({
-              container: containerRef.current!,
-              additionalModules: [
-                BpmnPropertiesPanelModule,
-                BpmnPropertiesProviderModule,
-                CamundaPlatformPropertiesProviderModule
-              ],
-              propertiesPanel: {
-                parent: propertiesPanelRef.current!
-              },
-              moddleExtensions: {
-                camunda: camundaModdleDescriptor
-              }
-            });
-            
-            // Import the XML into the fresh modeler
-            await (newModelerInstance as any).importXML(importedXml);
-            
-            // Update the modeler reference
-            setModeler(newModelerInstance);
-            
-            console.log('BPMN XML imported successfully with fresh modeler instance');
-            
-          } catch (recreateError) {
-            console.error('Error recreating modeler:', recreateError);
-            showToast('Import partially successful but modeler recreation failed', 'error');
-            return;
-          }
-          
-          // Update the XML state
-          setXml(importedXml || '');
-          
-          showToast('BPMN diagram imported successfully!', 'success');
-          
-          // Zoom to fit the viewport using the new modeler
-          setTimeout(() => {
-            try {
-              if (newModelerInstance) {
-                const canvas = (newModelerInstance as any).get('canvas');
-                if (canvas && typeof canvas.zoom === 'function') {
-                  canvas.zoom('fit-viewport');
-                }
-              }
-            } catch (zoomError) {
-              console.warn('Could not zoom to fit:', zoomError);
-            }
-          }, 100); // Small delay to ensure the diagram is fully rendered
-          
-        } catch (importError) {
-          // Clean up temp modeler if it exists
-          if (tempModeler) {
-            tempModeler.destroy();
-          }
-          
-          console.error('Import error:', importError);
-          const errorMessage = importError instanceof Error ? importError.message : 'Unknown import error';
-          
-          // Check if this is a BPMN validity error vs a system error
-          if (errorMessage.includes('no diagram to display') || 
-              errorMessage.includes('unparsable content') || 
-              errorMessage.includes('unknown type') ||
-              errorMessage.includes('Invalid BPMN')) {
-            // These are file validity errors - show user-friendly message but keep dialog open
-            showToast(`Invalid BPMN file: ${errorMessage}`, 'error');
-            setError(`Please check your BPMN file and try again. Error: ${errorMessage}`);
-            setIsImporting(false);
-            return; // Don't close dialog, let user try again
-          } else {
-            // These are system errors - show error and close dialog
-            showToast(`Import failed: ${errorMessage}`, 'error');
-            setError(`Import failed: ${errorMessage}`);
-            setIsImporting(false);
-            return; // Don't proceed with UI updates
-          }
-        }
-        
-        // Close the dialog only on successful import
-        setShowImportDialog(false);
-        setImportUrl('');
-        showToast('Import dialog closed after successful import', 'info');
-      } else {
-        const errorMsg = 'BPMN Modeler not initialized';
-        showToast(errorMsg, 'error');
-        throw new Error(errorMsg);
-      }
+      // Set the new XML content, which will trigger the XML import effect
+      setXml(normalizedXml);
+      await storeBpmnInRedis(normalizedXml, `imported_${Date.now()}.bpmn`);
+      showToast('BPMN diagram imported successfully!', 'success');
+      setShowImportDialog(false);
+      setImportUrl('');
 
     } catch (error) {
       console.error('Error importing BPMN from URL:', error);
@@ -917,11 +682,13 @@ const BpmnModelerComponent: React.FC<BpmnModelerProps> = ({ onSave, onClose, aut
         throw importError;
       }
       
-      // Zoom to fit the viewport
-      const canvas = (modelerInstance as any).get('canvas');
-      if (canvas && typeof canvas.zoom === 'function') {
-        canvas.zoom('fit-viewport');
-      }
+      // Zoom to fit the viewport with delay for proper rendering
+      setTimeout(() => {
+        const canvas = (modelerInstance as any).get('canvas');
+        if (canvas && typeof canvas.zoom === 'function') {
+          canvas.zoom('fit-viewport');
+        }
+      }, 200);
       
       console.log('Auto-import: BPMN imported successfully');
       
@@ -946,8 +713,8 @@ const BpmnModelerComponent: React.FC<BpmnModelerProps> = ({ onSave, onClose, aut
           </button>
           <button
             onClick={handleSave}
-            className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded text-sm font-medium"
-            disabled={isLoading}
+            className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded text-sm font-medium disabled:opacity-50"
+            disabled={isLoading || !isDirty}
           >
             Save
           </button>
@@ -1094,7 +861,7 @@ const BpmnModelerComponent: React.FC<BpmnModelerProps> = ({ onSave, onClose, aut
         {/* BPMN Canvas */}
         <div className="flex-1 relative">
           {/* Empty state message when no diagram is loaded and not auto-creating */}
-          {!isLoading && !xml && !error && !shouldAutoCreate && (
+          {!isLoading && !xml && !error && !initialXml && (
             <div className="absolute inset-0 flex items-center justify-center bg-gray-50">
               <div className="text-center">
                 <svg className="mx-auto h-16 w-16 text-gray-400 mb-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">

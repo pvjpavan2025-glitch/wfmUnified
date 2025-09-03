@@ -1,4 +1,4 @@
-version: "3.8"
+# version: "3.8"
 
 # WFM Unified System - Complete Orchestrator
 # This file manages all services with proper startup order and dependencies
@@ -113,7 +113,6 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
-    command: ["python", "-m", "auth_service.main"]
     depends_on:
       mongodb:
         condition: service_healthy
@@ -348,8 +347,7 @@ services:
     restart: unless-stopped
     ports:
       - "8010:8010"
-    entrypoint: ["python"]
-    command: ["-m", "process_service.main"]
+    command: ["uvicorn", "process_service.main:app", "--host", "0.0.0.0", "--port", "8010"]
     environment:
       - MONGODB_URL=mongodb://wfmadmin:tsarolabs%4012345%23@wfm-mongodb:27017/wfm?authSource=admin
       - MONGODB_TLS=false

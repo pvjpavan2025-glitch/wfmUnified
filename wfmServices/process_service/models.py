@@ -13,7 +13,6 @@ class ProcessInstanceCreate(BaseModel):
     order_id: str = Field(..., description="ID of the order this instance belongs to")
     input_data: Dict[str, Any] = Field(default_factory=dict, description="Input data for process execution")
     priority: PriorityEnum = Field(default=PriorityEnum.MEDIUM)
-    tenant_id: str
     status: StatusEnum = StatusEnum.PENDING
 
 
@@ -69,7 +68,6 @@ class TaskInstanceCreate(BaseModel):
     required_skills: List[str] = Field(default_factory=list)
     estimated_duration_minutes: int = Field(default=60, ge=1)
     priority: PriorityEnum = Field(default=PriorityEnum.MEDIUM)
-    tenant_id: str
     status: StatusEnum = StatusEnum.PENDING
 
 

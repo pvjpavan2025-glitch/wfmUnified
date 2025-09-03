@@ -263,4 +263,4 @@ def require_tenant_access():
             
             return await func(current_user, *args, **kwargs)
         return wrapper
-    return decorator 
+    return decorator

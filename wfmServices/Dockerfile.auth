@@ -17,5 +17,5 @@ COPY auth_service/ ./auth_service/
 # Expose port
 EXPOSE 8001
 
-# Run the auth service
-CMD ["python", "auth_service/simple_main.py"]
+# Run the auth service with uvicorn
+CMD ["uvicorn", "auth_service.main:app", "--host", "0.0.0.0", "--port", "8001"]

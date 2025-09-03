@@ -19,18 +19,22 @@ class ProcessService:
     def __init__(self):
         self.process_repo = ProcessInstanceRepository()
         self.task_repo = TaskInstanceRepository()
-        self.bpmn_engine_url = "http://localhost:8100"  # wfmProcess service
-        self.vendor_service_url = "http://localhost:8007"  # vendor service
+        self.bpmn_engine_url = "http://wfmprocess-backend:8000"  # wfmProcess service
+        self.vendor_service_url = "http://wfm_vendor_service:8009"  # vendor service
+
+    async def initialize(self):
+        """Initialize repositories."""
+        await self.process_repo.initialize()
+        await self.task_repo.initialize()
     
-    async def execute_process(self, request: ProcessExecutionRequest, tenant_id: str) -> ProcessExecutionResponse:
+    async def execute_process(self, request: ProcessExecutionRequest) -> ProcessExecutionResponse:
         """Execute a process by creating an instance and starting BPMN execution."""
         # Create process instance
         instance_data = ProcessInstanceCreate(
             process_id=request.process_id,
             order_id=request.order_id,
             input_data=request.input_data,
-            priority=request.priority,
-            tenant_id=tenant_id
+            priority=request.priority
         )
         
         process_instance = ProcessInstance(
@@ -48,7 +52,7 @@ class ProcessService:
                     json={
                         "process_instance_id": created_instance.id,
                         "input_data": request.input_data,
-                        "tenant_id": tenant_id
+                        "tenant_id": "default"
                     }
                 )
                 bpmn_data = bpmn_response.json()
@@ -56,7 +60,7 @@ class ProcessService:
                 # Update instance with execution ID
                 await self.process_repo.update(
                     created_instance.id,
-                    tenant_id,
+                    "default",
                     {
                         "execution_id": bpmn_data.get("execution_id"),
                         "status": "in_progress"
@@ -69,13 +73,13 @@ class ProcessService:
                     task_instance = await self.create_task_instance_from_bpmn(
                         created_instance.id,
                         task_data,
-                        tenant_id
+                        "default"
                     )
                     created_tasks.append(task_instance.id)
                 
                 # Auto-assign tasks if requested
                 if request.auto_assign_tasks:
-                    await self.auto_assign_tasks(created_tasks, tenant_id)
+                    await self.auto_assign_tasks(created_tasks, "default")
                 
                 return ProcessExecutionResponse(
                     process_instance_id=created_instance.id,
@@ -89,7 +93,7 @@ class ProcessService:
             # Update instance status to failed
             await self.process_repo.update(
                 created_instance.id,
-                tenant_id,
+                "default",
                 {
                     "status": "failed",
                     "error_message": str(e)

@@ -10,10 +10,13 @@ import ColorPickerModule from 'bpmn-js-color-picker';
 import camundaModdleDescriptor from 'camunda-bpmn-moddle/resources/camunda.json';
 import MinimapModule from 'diagram-js-minimap';
 import { useBpmnModelerSafe } from '@/hooks/useBpmnModelerSafe';
+import type { BpmnElement } from '@/types/global';
 
 import 'bpmn-js/dist/assets/diagram-js.css';
 import 'bpmn-js/dist/assets/bpmn-font/css/bpmn.css';
 import 'bpmn-js-properties-panel/dist/assets/properties-panel.css';
+import 'bpmn-js-properties-panel/dist/assets/element-templates.css';
+import '@bpmn-io/properties-panel/assets/properties-panel.css';
 import 'diagram-js-minimap/assets/diagram-js-minimap.css';
 import './BpmnModeler.css';
 
@@ -357,8 +360,8 @@ const BpmnModelerComponent: React.FC<BpmnModelerProps> = ({
             Array.from(shapeElements).slice(0, 3).forEach((el, i) => {
               const style = getComputedStyle(el as Element);
               console.log(`    Shape ${i}:`, {
-                id: el.getAttribute('data-element-id'),
-                transform: el.getAttribute('transform'),
+                id: (el as Element).getAttribute('data-element-id'),
+                transform: (el as Element).getAttribute('transform'),
                 visibility: style.visibility,
                 display: style.display,
                 opacity: style.opacity
@@ -802,7 +805,7 @@ const BpmnModelerComponent: React.FC<BpmnModelerProps> = ({
           const elementRegistry = modelerRef.current.get('elementRegistry');
           console.log('  - Canvas:', canvas);
           console.log('  - Element registry:', elementRegistry);
-          console.log('  - All elements:', elementRegistry.getAll().map(el => ({ id: el.id, type: el.type })));
+          console.log('  - All elements:', elementRegistry.getAll().map((el: BpmnElement) => ({ id: el.id, type: el.type })));
         } catch (e) {
           console.log('  - Error accessing modeler services:', e);
         }
@@ -892,8 +895,8 @@ const BpmnModelerComponent: React.FC<BpmnModelerProps> = ({
         if (shapeElements && shapeElements.length > 0) {
           Array.from(shapeElements).slice(0, 3).forEach((el, i) => {
             console.log(`  - Shape ${i}:`, {
-              id: el.getAttribute('data-element-id'),
-              transform: el.getAttribute('transform'),
+              id: (el as Element).getAttribute('data-element-id'),
+              transform: (el as Element).getAttribute('transform'),
               visibility: getComputedStyle(el as Element).visibility,
               display: getComputedStyle(el as Element).display
             });
@@ -923,14 +926,14 @@ const BpmnModelerComponent: React.FC<BpmnModelerProps> = ({
           },
           showElements: () => {
             const elements = elementRegistry.getAll();
-            console.log('📊 All elements:', elements.map(el => ({ id: el.id, type: el.type, x: el.x, y: el.y, width: el.width, height: el.height })));
+            console.log('📊 All elements:', elements.map((el: BpmnElement) => ({ id: el.id, type: el.type, x: el.x, y: el.y, width: el.width, height: el.height })));
           },
           checkVisibility: () => {
             const shapes = canvasContainer?.querySelectorAll('[data-element-id]');
             console.log('👁️ Element visibility:');
             Array.from(shapes || []).forEach(el => {
               const style = getComputedStyle(el as Element);
-              console.log(`  ${el.getAttribute('data-element-id')}: visible=${style.visibility}, display=${style.display}, opacity=${style.opacity}`);
+              console.log(`  ${(el as Element).getAttribute('data-element-id')}: visible=${style.visibility}, display=${style.display}, opacity=${style.opacity}`);
             });
           }
         };

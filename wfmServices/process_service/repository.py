@@ -12,8 +12,14 @@ class ProcessInstanceRepository:
     """Repository for process instance operations."""
     
     def __init__(self):
-        self.db = get_database()
-        self.collection = self.db.process_instances
+        self.db = None
+        self.collection = None
+    
+    async def initialize(self):
+        """Initialize database connection."""
+        if not self.db:
+            self.db = await get_database()
+            self.collection = self.db.process_instances
     
     async def create(self, process_instance: ProcessInstance) -> ProcessInstance:
         """Create a new process instance."""
@@ -88,8 +94,14 @@ class TaskInstanceRepository:
     """Repository for task instance operations."""
     
     def __init__(self):
-        self.db = get_database()
-        self.collection = self.db.task_instances
+        self.db = None
+        self.collection = None
+    
+    async def initialize(self):
+        """Initialize database connection."""
+        if not self.db:
+            self.db = await get_database()
+            self.collection = self.db.task_instances
     
     async def create(self, task_instance: TaskInstance) -> TaskInstance:
         """Create a new task instance."""

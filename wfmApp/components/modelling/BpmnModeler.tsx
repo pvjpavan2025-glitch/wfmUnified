@@ -393,6 +393,36 @@ const BpmnModelerComponent: React.FC<BpmnModelerProps> = ({
               console.log('🔄 Resetting viewbox...');
               canvas.viewbox({ x: 0, y: 0, width: 1200, height: 800 });
               canvas.zoom('fit-viewport');
+            },
+            forceVisibility: () => {
+              console.log('👁️ FORCING VISIBILITY...');
+              const canvasContainer = canvas.getContainer();
+              const svgElement = canvasContainer?.querySelector('svg');
+              const shapeElements = canvasContainer?.querySelectorAll('[data-element-id]');
+              
+              // Force container refresh
+              if (canvasContainer) {
+                canvasContainer.style.transform = 'translateZ(0)';
+                setTimeout(() => canvasContainer.style.transform = '', 50);
+              }
+              
+              // Force SVG refresh
+              if (svgElement) {
+                svgElement.style.opacity = '0.99';
+                setTimeout(() => svgElement.style.opacity = '1', 50);
+              }
+              
+              // Force shape visibility
+              if (shapeElements) {
+                Array.from(shapeElements).forEach((el: any) => {
+                  el.style.opacity = '1';
+                  el.style.visibility = 'visible';
+                  el.style.display = 'block';
+                });
+              }
+              
+              canvas.zoom('fit-viewport');
+              console.log('✅ Visibility forced!');
             }
           };
         } catch (e) {
@@ -407,16 +437,22 @@ const BpmnModelerComponent: React.FC<BpmnModelerProps> = ({
 
   // Separate effect to handle XML changes without reinitializing modeler
   useEffect(() => {
-    // Skip effect if manual import is in progress or recently completed
-    if (!modelerRef.current || !xml || xml === initialXml || isManualImport || manualImportRef.current) {
-      console.log('📥 SKIPPING effect import - manual import in progress or no XML change');
+    // COMPLETELY DISABLE EFFECT DURING MANUAL IMPORTS
+    if (isManualImport || manualImportRef.current) {
+      console.log('📥 SKIPPING effect import - manual import in progress');
       return;
     }
     
-    // Additional check: Don't run effect within 5 seconds of manual import (increased from 2)
+    // Skip effect if no modeler or XML
+    if (!modelerRef.current || !xml || xml === initialXml) {
+      console.log('📥 SKIPPING effect import - no XML change or no modeler');
+      return;
+    }
+    
+    // Additional check: Don't run effect within 10 seconds of manual import (increased from 5)
     const now = Date.now();
     if (!window.__lastManualImport) window.__lastManualImport = 0;
-    if (now - window.__lastManualImport < 5000) {
+    if (now - window.__lastManualImport < 10000) {
       console.log('📥 SKIPPING effect import - recent manual import detected');
       return;
     }
@@ -424,6 +460,13 @@ const BpmnModelerComponent: React.FC<BpmnModelerProps> = ({
     // Additional check: Don't run if we just imported from URL/file
     if (window.__recent_manual_import === true) {
       console.log('📥 SKIPPING effect import - manual import flag detected');
+      return;
+    }
+
+    // CHECK XML LENGTH TO PREVENT OVERRIDING LARGE IMPORTS
+    if (xml.length < 1000 && window.__lastManualImport && (now - window.__lastManualImport < 30000)) {
+      console.log('📥 SKIPPING effect import - small XML might override recent large import');
+      console.log(`  - Current XML: ${xml.length} chars, Recent manual import: ${(now - window.__lastManualImport)/1000}s ago`);
       return;
     }
 
@@ -1148,6 +1191,79 @@ const BpmnModelerComponent: React.FC<BpmnModelerProps> = ({
       console.log('📊 Imported elements count:', importedElements.length);
       console.log('📊 Imported elements:', importedElements.map((el: any) => ({ id: el.id, type: el.type })));
       
+      // AGGRESSIVE RENDERING FIX - Force visibility and redraw
+      console.log('🎨 FORCING DIAGRAM VISIBILITY...');
+      
+      // 1. Force multiple redraws with delays
+      const forceRedraw = async () => {
+        // Force CSS redraw
+        if (containerRef.current) {
+          containerRef.current.classList.add('force-redraw');
+          await new Promise(resolve => setTimeout(resolve, 50));
+          containerRef.current.classList.remove('force-redraw');
+        }
+        
+        // Force canvas refresh
+        canvas.viewbox(canvas.viewbox());
+        await new Promise(resolve => setTimeout(resolve, 50));
+        
+        try {
+          canvas.zoom('fit-viewport', 'auto');
+        } catch (e) {
+          console.debug('Zoom failed:', e);
+        }
+      };
+
+      // Multiple redraw attempts with increasing delays
+      forceRedraw()
+        .then(() => new Promise(resolve => setTimeout(resolve, 100)))
+        .then(forceRedraw)
+        .then(() => new Promise(resolve => setTimeout(resolve, 200)))
+        .then(forceRedraw);
+      
+      // 2. Force container and element visibility
+      const canvasContainer = canvas.getContainer();
+      if (canvasContainer) {
+        // Force container refresh
+        canvasContainer.style.transform = 'translateZ(0)';
+        canvasContainer.style.position = 'relative';
+        canvasContainer.style.zIndex = '1';
+        
+        // Force SVG visibility
+        const svgElement = canvasContainer.querySelector('svg');
+        if (svgElement) {
+          Object.assign(svgElement.style, {
+            position: 'relative',
+            zIndex: '10',
+            width: '100%',
+            height: '100%',
+            opacity: '1',
+            visibility: 'visible',
+            display: 'block'
+          });
+        }
+        
+        // Force all shape elements to be visible and interactive
+        const shapeElements = canvasContainer.querySelectorAll('[data-element-id]');
+        if (shapeElements) {
+          Array.from(shapeElements).forEach((el: any) => {
+            Object.assign(el.style, {
+              opacity: '1',
+              visibility: 'visible',
+              display: 'block',
+              pointerEvents: 'auto'
+            });
+          });
+        }
+        
+        // Restore container transform after a delay
+        setTimeout(() => {
+          canvasContainer.style.transform = '';
+        }, 100);
+      }
+      
+      console.log('✅ VISIBILITY FORCED - diagram should now be visible');
+      
       // Force canvas to refresh/redraw
       if (canvas.viewbox) {
         canvas.viewbox(canvas.viewbox());
@@ -1177,7 +1293,7 @@ const BpmnModelerComponent: React.FC<BpmnModelerProps> = ({
             manualImportRef.current = false;
             window.__recent_manual_import = false;  // Clear additional protection
             console.log('🔄 Manual import flags cleared');
-          }, 1000);
+          }, 5000);  // Extended to 5 seconds
           
         } catch (e) {
           console.error('❌ Error in viewport fitting:', e);
@@ -1187,7 +1303,7 @@ const BpmnModelerComponent: React.FC<BpmnModelerProps> = ({
             manualImportRef.current = false;
             window.__recent_manual_import = false;  // Clear additional protection
             console.log('🔄 Manual import flags cleared (after error)');
-          }, 1000);
+          }, 5000);  // Extended to 5 seconds
         }
       }, 500);
       

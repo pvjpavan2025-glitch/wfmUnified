@@ -208,3 +208,59 @@
   overflow: hidden; /* hide any overflow from misplaced layers */
   min-height: 480px; /* sensible default to avoid zero-height during layout */
 }
+
+/* Force proper layering for BPMN diagram elements */
+.bpmn-canvas-container .djs-container {
+  position: relative !important;
+  z-index: 1 !important;
+}
+
+.bpmn-canvas-container .djs-container svg {
+  position: relative !important;
+  z-index: 10 !important;
+  background: transparent !important;
+  width: 100% !important;
+  height: 100% !important;
+}
+
+/* Ensure diagram elements are visible and properly layered */
+.bpmn-canvas-container .djs-container svg g {
+  opacity: 1 !important;
+  visibility: visible !important;
+  display: block !important;
+}
+
+/* Fix potential background masking issues */
+.bpmn-canvas-container .djs-container .djs-viewport {
+  position: relative !important;
+  z-index: 5 !important;
+}
+
+/* Ensure shapes and connections are visible */
+.bpmn-canvas-container [data-element-id] {
+  opacity: 1 !important;
+  visibility: visible !important;
+  pointer-events: auto !important;
+}
+
+/* Force redraw on import */
+.bpmn-canvas-container.force-redraw {
+  transform: translateZ(0); /* Force GPU layer to trigger redraw */
+  will-change: transform; /* Hint to browser about upcoming transform */
+  contain: layout style paint; /* Optimize repaints */
+}
+
+/* Ensure proper scaling and positioning during imports */
+.bpmn-canvas-container .djs-container {
+  transform-origin: 0 0;
+  backface-visibility: hidden;
+}
+
+/* Debug visibility helper */
+.bpmn-canvas-container.debug-mode svg {
+  border: 2px solid red !important;
+}
+
+.bpmn-canvas-container.debug-mode [data-element-id] {
+  outline: 1px solid blue !important;
+}

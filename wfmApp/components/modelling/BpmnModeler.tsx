@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { processApiService } from '@/services/processApi';
+import { workflowApiService } from '@/services/workflowApi';
 import BpmnModeler from 'bpmn-js/lib/Modeler';
 import {
   BpmnPropertiesPanelModule,
@@ -14,8 +15,9 @@ import type { BpmnElement } from '@/types/global';
 
 import 'bpmn-js/dist/assets/diagram-js.css';
 import 'bpmn-js/dist/assets/bpmn-font/css/bpmn.css';
-import 'bpmn-js-properties-panel/dist/assets/properties-panel.css';
-import 'bpmn-js-properties-panel/dist/assets/element-templates.css';
+// CSS imports commented out due to build issues - styles will be handled via CDN or inline
+// import 'bpmn-js-properties-panel/dist/assets/properties-panel.css';
+// import 'bpmn-js-properties-panel/dist/assets/element-templates.css';
 import '@bpmn-io/properties-panel/assets/properties-panel.css';
 import 'diagram-js-minimap/assets/diagram-js-minimap.css';
 import './BpmnModeler.css';
@@ -671,6 +673,57 @@ const BpmnModelerComponent: React.FC<BpmnModelerProps> = ({
       console.error('Error saving diagram:', err);
       setError(`Failed to save diagram: ${err.message}`);
       showToast(`Error saving diagram: ${err.message}`, 'error');
+    }
+  };
+
+  const handleSaveAndExecute = async () => {
+    if (!modelerRef.current) return;
+    try {
+      console.log('🚀 Starting save and execute process...');
+      
+      // First save the diagram
+      const freshResult = await (modelerRef.current as any).saveXML({ format: true });
+      const freshXml = freshResult.xml || '';
+      
+      if (!freshXml || freshXml.length < 100) {
+        throw new Error('Invalid BPMN XML generated');
+      }
+      
+      setXml(freshXml);
+      
+      // Call onSave if provided
+      if (onSave) {
+        onSave(freshXml);
+      }
+      onDirtyChange(false);
+      
+      // Show saving toast
+      showToast('Workflow saved. Creating and executing workflow instance...', 'info');
+      
+      // Create and execute workflow
+      const workflowName = `Workflow_${new Date().toISOString().slice(0, 19).replace(/:/g, '-')}`;
+      const executionResult = await workflowApiService.createAndExecuteWorkflow({
+        bpmn_xml: freshXml,
+        workflow_name: workflowName,
+        workflow_description: 'Workflow created and executed from BPMN Modeler',
+        input_data: {},
+        created_by: 'user' // This should come from auth context
+      });
+      
+      showToast(`Workflow executed successfully! Instance ID: ${executionResult.instance.id}`, 'success');
+      
+      // Optionally navigate to the instance details page
+      if (typeof window !== 'undefined') {
+        setTimeout(() => {
+          window.open(`/instances/${executionResult.instance.id}`, '_blank');
+        }, 1000);
+      }
+      
+    } catch (err: any) {
+      console.error('Error saving and executing workflow:', err);
+      const errorMessage = err.message || 'Unknown error occurred';
+      setError(`Failed to save and execute workflow: ${errorMessage}`);
+      showToast(`Error: ${errorMessage}`, 'error');
     }
   };
 
@@ -1427,16 +1480,16 @@ const BpmnModelerComponent: React.FC<BpmnModelerProps> = ({
           <button
             onClick={handleSave}
             className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded text-sm font-medium disabled:opacity-50"
-            disabled={isLoading || !isDirty}
+            disabled={isLoading || (!isDirty && !xml)}
           >
             Save
           </button>
           <button
-            onClick={handleExecuteWorkflow}
-            className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded text-sm font-medium"
-            disabled={isLoading || !xml}
+            onClick={handleSaveAndExecute}
+            className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded text-sm font-medium disabled:opacity-50"
+            disabled={isLoading || (!isDirty && !xml)}
           >
-            Execute Workflow
+            Save & Execute
           </button>
           <button
             onClick={handleToggleTransactionBoundaries}

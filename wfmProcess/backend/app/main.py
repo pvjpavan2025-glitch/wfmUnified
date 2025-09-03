@@ -19,6 +19,8 @@ from .api.tasks import router as tasks_router
 from .api.executions import router as executions_router
 from .api.processes import router as process_management_router
 from .api.bpmn_temp_storage import router as bpmn_temp_storage_router
+from .api.workflow_execution import router as workflow_execution_router
+from .api.workflow_instances import router as workflow_instances_router
 
 
 # Configure logging
@@ -108,6 +110,8 @@ app.include_router(tasks_router, prefix=f"{settings.api_prefix}/tasks", tags=["t
 app.include_router(executions_router, prefix=f"{settings.api_prefix}/executions", tags=["executions"])
 app.include_router(process_management_router, prefix=f"{settings.api_prefix}/processes", tags=["processes"])
 app.include_router(bpmn_temp_storage_router, prefix=f"{settings.api_prefix}/bpmn-temp", tags=["bpmn-temp-storage"])
+app.include_router(workflow_execution_router, prefix="/api/v1", tags=["workflow-execution"])
+app.include_router(workflow_instances_router, prefix="/api/v1", tags=["workflow-instances"])
 
 
 @app.get("/")

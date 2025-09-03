@@ -173,6 +173,37 @@ services:
       redis:
         condition: service_healthy
 
+  workflow-instance-service:
+    build:
+      context: ./wfmServices
+      dockerfile: Dockerfile
+    container_name: wfm_workflow_instance_service
+    restart: unless-stopped
+    ports:
+      - "8011:8011"
+    entrypoint: ["python"]
+    command: ["-m", "workflow_instance_service.main"]
+    environment:
+      - POSTGRESQL_URL=postgresql://workflow_user:workflow_pass@wfm-postgres:5432/workflow
+      - MONGODB_URL=mongodb://wfmadmin:tsarolabs%4012345%23@wfm-mongodb:27017/wfm?authSource=admin
+      - MONGODB_TLS=false
+      - REDIS_URL=redis://wfm-redis:6379
+      - DATABASE_NAME=wfm
+      - JWT_SECRET_KEY=wfmv4-super-secret-jwt-key-change-in-production
+      - ENVIRONMENT=development
+      - ENV_FILE=env.local
+    volumes:
+      - ./wfmServices/logs:/app/logs
+    networks:
+      - wfm-network
+    depends_on:
+      postgres:
+        condition: service_healthy
+      mongodb:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
   order-service:
     build:
       context: ./wfmServices

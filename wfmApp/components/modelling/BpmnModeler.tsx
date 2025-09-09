@@ -189,14 +189,23 @@ const BpmnModelerComponent: React.FC<BpmnModelerProps> = ({
           }, 150); // 150ms debounce
         };
         
-        // Listen for element selection changes
+        // Listen for element selection changes - simple and clean
         eventBus.on('selection.changed', (event: any) => {
           const { newSelection } = event;
+          
           if (newSelection && newSelection.length > 0) {
-            setSelectedElement(newSelection[0]);
+            const selectedElement = newSelection[0];
+            setSelectedElement(selectedElement);
+            console.log('✅ Selected:', selectedElement.type, selectedElement.id);
           } else {
             setSelectedElement(null);
+            console.log('❌ No selection');
           }
+        });
+
+        // Listen for element clicks (for debugging only)
+        eventBus.on('element.click', (event: any) => {
+          console.log('👆 Clicked:', event.element?.type, event.element?.id);
         });
 
         // Primary change detection - command stack is the most reliable
@@ -211,11 +220,67 @@ const BpmnModelerComponent: React.FC<BpmnModelerProps> = ({
           debouncedDirtyChange();
         });
 
+        // Add debug helper for properties panel
+        (window as any).__debug_properties_panel = () => {
+          try {
+            if (newModeler) {
+              const propertiesPanel = newModeler.get('propertiesPanel');
+              const selection = newModeler.get('selection');
+              const currentSelection = selection.get();
+              
+              console.log('🔍 Properties Panel Debug:');
+              console.log('  - Properties Panel Service:', !!propertiesPanel);
+              console.log('  - Current Selection:', currentSelection?.map((el: any) => ({ id: el.id, type: el.type, businessObject: el.businessObject?.$type })));
+              console.log('  - Properties Panel Container:', propertiesPanelRef.current);
+              console.log('  - Properties Panel Container Content:', propertiesPanelRef.current?.innerHTML.substring(0, 200));
+              
+              if (propertiesPanel) {
+                console.log('  - Properties Panel Methods:', Object.getOwnPropertyNames(Object.getPrototypeOf(propertiesPanel)));
+              }
+            }
+          } catch (e) {
+            console.error('Properties panel debug failed:', e);
+          }
+        };
+        
+        console.log('🛠️ Debug helper available: __debug_properties_panel()');
         console.log('✅ Event listeners attached successfully');
 
         // Set the modeler ref
         modelerRef.current = newModeler;
         console.log('✅ Modeler ref set successfully');
+
+        // Force properties panel initialization and connection to selection
+        try {
+          const propertiesPanel = newModeler.get('propertiesPanel');
+          const selection = newModeler.get('selection');
+          
+          console.log('🔧 Properties panel service:', !!propertiesPanel);
+          console.log('🔧 Selection service:', !!selection);
+          
+          // Ensure properties panel is properly attached
+          if (propertiesPanel && propertiesPanelRef.current) {
+            console.log('✅ Properties panel found and container ready');
+            
+            // Force a selection change to initialize the properties panel
+            setTimeout(() => {
+              try {
+                if (newModeler) {
+                  const rootElement = newModeler.get('canvas').getRootElement();
+                  if (rootElement) {
+                    selection.select([]);
+                    selection.select([rootElement]);
+                    console.log('✅ Initial properties panel selection set');
+                  }
+                }
+              } catch (e) {
+                console.warn('⚠️ Could not set initial properties panel selection:', e);
+              }
+            }, 100);
+          }
+        } catch (e) {
+          console.warn('⚠️ Properties panel initialization check failed:', e);
+        }
         // Ensure the viewport fits the canvas after initialization
         try {
           await zoomSafely(newModeler, 'fit-viewport');
@@ -1739,6 +1804,7 @@ const BpmnModelerComponent: React.FC<BpmnModelerProps> = ({
           <div className="flex-1 overflow-auto">
             <div
               ref={propertiesPanelRef}
+              id="properties-panel"
               className="h-full properties-panel-container"
               style={{ minHeight: '300px', width: '100%' }}
             />

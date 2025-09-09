@@ -2,8 +2,8 @@
  * Workflow API service for managing workflow instances and execution.
  */
 
-const WORKFLOW_INSTANCE_SERVICE_URL = process.env.NEXT_PUBLIC_WORKFLOW_INSTANCE_SERVICE_URL || 'http://localhost:8100/api/v1';
-const WORKFLOW_EXECUTION_SERVICE_URL = process.env.NEXT_PUBLIC_WORKFLOW_EXECUTION_SERVICE_URL || 'http://localhost:8100/api/v1';
+const WORKFLOW_INSTANCE_SERVICE_URL = process.env.NEXT_PUBLIC_BPMN_BACKEND_URL || 'http://localhost:8100';
+const WORKFLOW_EXECUTION_SERVICE_URL = process.env.NEXT_PUBLIC_BPMN_BACKEND_URL || 'http://localhost:8100';
 
 export interface WorkflowInstanceCreate {
   name: string;
@@ -69,7 +69,7 @@ class WorkflowApiService {
    */
   async createWorkflowInstance(data: WorkflowInstanceCreate): Promise<WorkflowInstance> {
     try {
-      const response = await fetch(`${WORKFLOW_INSTANCE_SERVICE_URL}/instances`, {
+      const response = await fetch(`${WORKFLOW_INSTANCE_SERVICE_URL}/api/v1/instances`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -119,7 +119,7 @@ class WorkflowApiService {
    */
   async executeWorkflow(instanceId: string, inputData: Record<string, any> = {}): Promise<any> {
     try {
-      const response = await fetch(`${WORKFLOW_INSTANCE_SERVICE_URL}/instances/${instanceId}/execute`, {
+      const response = await fetch(`${WORKFLOW_INSTANCE_SERVICE_URL}/api/v1/instances/${instanceId}/execute`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -148,7 +148,7 @@ class WorkflowApiService {
    */
   async continueWorkflow(instanceId: string, taskData: Record<string, any> = {}): Promise<any> {
     try {
-      const response = await fetch(`${WORKFLOW_EXECUTION_SERVICE_URL}/workflow-execution/instances/${instanceId}/continue`, {
+      const response = await fetch(`${WORKFLOW_EXECUTION_SERVICE_URL}/api/v1/workflow-execution/instances/${instanceId}/continue`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -173,7 +173,7 @@ class WorkflowApiService {
    */
   async cancelWorkflow(instanceId: string, cancelledBy: string): Promise<void> {
     try {
-      const response = await fetch(`${WORKFLOW_EXECUTION_SERVICE_URL}/workflow-execution/instances/${instanceId}/cancel`, {
+      const response = await fetch(`${WORKFLOW_EXECUTION_SERVICE_URL}/api/v1/workflow-execution/instances/${instanceId}/cancel`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -196,7 +196,7 @@ class WorkflowApiService {
    */
   async getWorkflowInstance(instanceId: string): Promise<WorkflowInstance> {
     try {
-      const response = await fetch(`${WORKFLOW_INSTANCE_SERVICE_URL}/instances/${instanceId}`);
+      const response = await fetch(`${WORKFLOW_INSTANCE_SERVICE_URL}/api/v1/instances/${instanceId}`);
 
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
@@ -227,7 +227,7 @@ class WorkflowApiService {
       if (params.status) searchParams.append('status', params.status);
       if (params.created_by) searchParams.append('created_by', params.created_by);
 
-      const response = await fetch(`${WORKFLOW_INSTANCE_SERVICE_URL}/instances?${searchParams}`);
+      const response = await fetch(`${WORKFLOW_INSTANCE_SERVICE_URL}/api/v1/instances?${searchParams}`);
 
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
@@ -246,7 +246,7 @@ class WorkflowApiService {
    */
   async getWorkflowStatus(instanceId: string): Promise<any> {
     try {
-      const response = await fetch(`${WORKFLOW_EXECUTION_SERVICE_URL}/workflow-execution/instances/${instanceId}/status`);
+      const response = await fetch(`${WORKFLOW_EXECUTION_SERVICE_URL}/api/v1/workflow-execution/instances/${instanceId}/status`);
 
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
@@ -271,7 +271,7 @@ class WorkflowApiService {
     errorMessage?: string
   ): Promise<void> {
     try {
-      const response = await fetch(`${WORKFLOW_INSTANCE_SERVICE_URL}/instances/${instanceId}/steps/${stepId}/status`, {
+      const response = await fetch(`${WORKFLOW_INSTANCE_SERVICE_URL}/api/v1/instances/${instanceId}/steps/${stepId}/status`, {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',

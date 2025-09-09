@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useEffect } from 'react';
+import { AppShell } from '@/components/app-shell';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -10,20 +11,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Search, Filter, Eye, Play, Square, Pause, RotateCcw } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { toast } from 'sonner';
-
-interface WorkflowInstance {
-  id: string;
-  name: string;
-  description?: string;
-  workflow_definition_id: string;
-  status: 'pending' | 'running' | 'completed' | 'failed' | 'cancelled' | 'suspended' | 'paused';
-  created_at: string;
-  updated_at: string;
-  created_by: string;
-  started_at?: string;
-  completed_at?: string;
-  error_message?: string;
-}
+import { workflowApiService, WorkflowInstance } from '@/services/workflowApi';
 
 const statusColors = {
   pending: 'bg-yellow-100 text-yellow-800 border-yellow-200',
@@ -62,21 +50,13 @@ export default function InstancesPage() {
   const fetchInstances = async () => {
     try {
       setLoading(true);
-      const params = new URLSearchParams({
-        skip: ((currentPage - 1) * itemsPerPage).toString(),
-        limit: itemsPerPage.toString()
-      });
+      const params = {
+        skip: (currentPage - 1) * itemsPerPage,
+        limit: itemsPerPage,
+        ...(statusFilter !== 'all' && { status: statusFilter })
+      };
 
-      if (statusFilter !== 'all') {
-        params.append('status', statusFilter);
-      }
-
-      const response = await fetch(`http://localhost:8100/api/v1/instances?${params}`);
-      if (!response.ok) {
-        throw new Error('Failed to fetch workflow instances');
-      }
-
-      const data = await response.json();
+      const data = await workflowApiService.getWorkflowInstances(params);
       setInstances(data);
       
       // Calculate total pages (this would typically come from the API)
@@ -101,18 +81,7 @@ export default function InstancesPage() {
 
   const handleExecuteWorkflow = async (instanceId: string) => {
     try {
-      const response = await fetch(`http://localhost:8002/api/v1/workflow-execution/instances/${instanceId}/continue`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({ task_data: {} })
-      });
-
-      if (!response.ok) {
-        throw new Error('Failed to execute workflow');
-      }
-
+      await workflowApiService.executeWorkflow(instanceId, {});
       toast.success('Workflow execution started');
       fetchInstances(); // Refresh the list
     } catch (error) {
@@ -123,18 +92,7 @@ export default function InstancesPage() {
 
   const handleCancelWorkflow = async (instanceId: string) => {
     try {
-      const response = await fetch(`http://localhost:8002/api/v1/workflow-execution/instances/${instanceId}/cancel`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({ cancelled_by: 'user' })
-      });
-
-      if (!response.ok) {
-        throw new Error('Failed to cancel workflow');
-      }
-
+      await workflowApiService.cancelWorkflow(instanceId, 'user');
       toast.success('Workflow cancelled');
       fetchInstances(); // Refresh the list
     } catch (error) {
@@ -164,15 +122,8 @@ export default function InstancesPage() {
   };
 
   return (
-    <div className="container mx-auto p-6 space-y-6">
-      <div className="flex justify-between items-center">
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight">Workflow Instances</h1>
-          <p className="text-muted-foreground">
-            Monitor and manage your workflow executions
-          </p>
-        </div>
-      </div>
+    <AppShell title="Workflow Instances" subtitle="Monitor and manage your workflow executions">
+      <div className="space-y-6">
 
       {/* Filters */}
       <Card>
@@ -345,6 +296,7 @@ export default function InstancesPage() {
           </Button>
         </div>
       )}
-    </div>
+      </div>
+    </AppShell>
   );
 }

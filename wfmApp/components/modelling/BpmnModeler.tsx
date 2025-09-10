@@ -15,9 +15,8 @@ import type { BpmnElement } from '@/types/global';
 
 import 'bpmn-js/dist/assets/diagram-js.css';
 import 'bpmn-js/dist/assets/bpmn-font/css/bpmn.css';
-// CSS imports commented out due to build issues - styles will be handled via CDN or inline
-// import 'bpmn-js-properties-panel/dist/assets/properties-panel.css';
-// import 'bpmn-js-properties-panel/dist/assets/element-templates.css';
+import 'bpmn-js-properties-panel/dist/assets/properties-panel.css';
+import 'bpmn-js-properties-panel/dist/assets/element-templates.css';
 import '@bpmn-io/properties-panel/assets/properties-panel.css';
 import 'diagram-js-minimap/assets/diagram-js-minimap.css';
 import './BpmnModeler.css';
@@ -58,6 +57,16 @@ const BpmnModelerComponent: React.FC<BpmnModelerProps> = ({
   const [toast, setToast] = useState<{message: string, type: 'success' | 'error' | 'info'} | null>(null);
   const [isManualImport, setIsManualImport] = useState(false);
   const manualImportRef = useRef(false);
+
+  // Ensure camunda namespace is present so Camunda properties provider activates element groups
+  const ensureCamundaNamespace = useCallback((rawXml: string | undefined | null): string => {
+    if (!rawXml) return '';
+    if (/xmlns:camunda="http:\/\/camunda.org\/schema\/1.0\/bpmn"/.test(rawXml)) return rawXml;
+    return rawXml.replace(/<bpmn:definitions([^>]*)>/, (match, attrs) => {
+      if (/xmlns:camunda=/.test(attrs)) return match; // already injected inside tag
+      return `<bpmn:definitions${attrs} xmlns:camunda="http://camunda.org/schema/1.0/bpmn">`;
+    });
+  }, []);
 
   // Use the safe BPMN modeler hook
   const {
@@ -120,7 +129,6 @@ const BpmnModelerComponent: React.FC<BpmnModelerProps> = ({
         try {
           const existing = (window as any).__wfm_bpmn_modeler_active as BpmnModeler | undefined;
           if (existing && typeof existing.destroy === 'function') {
-            console.log('🧹 Destroying previously active global BPMN modeler');
             try { existing.destroy(); } catch (e) { console.warn('Error destroying existing global modeler', e); }
             delete (window as any).__wfm_bpmn_modeler_active;
           }
@@ -133,7 +141,6 @@ const BpmnModelerComponent: React.FC<BpmnModelerProps> = ({
           // Clear the properties panel first to prevent duplicates
           if (propertiesPanelRef.current) {
             propertiesPanelRef.current.innerHTML = '';
-            console.log('🧹 Cleared properties panel content');
           }
           
           const selectors = ['.djs-container', '.bpmn-js', '.diagram-js', '.djs-minimap', '.bpmn-js-minimap', '.bio-properties-panel'];
@@ -142,7 +149,6 @@ const BpmnModelerComponent: React.FC<BpmnModelerProps> = ({
               if (!containerRef.current?.contains(el) && !propertiesPanelRef.current?.contains(el) && !minimapRef.current?.contains(el)) {
                 // Only remove if element is outside our intended containers
                 (el as HTMLElement).remove();
-                console.log('🧹 Removed dangling diagram element', sel);
               }
             });
           });
@@ -176,6 +182,57 @@ const BpmnModelerComponent: React.FC<BpmnModelerProps> = ({
 
         // Set up event listeners AFTER canvas is ready
         const eventBus = newModeler.get('eventBus') as any;
+
+        // Instrument selection service to trace who calls select() - debug only
+        try {
+          const selectionService = newModeler.get('selection');
+          if (selectionService && !selectionService.__wrappedForDebug) {
+            const origSelect = selectionService.select.bind(selectionService);
+            selectionService.select = function(...args: any[]) {
+              try {
+                const arg = args && args[0];
+                const id = Array.isArray(arg) ? (arg[0]?.id) : (arg?.id || arg);
+
+                console.log('🔔 selection.select called with:', {
+                  args: args,
+                  id: id,
+                  currentSelection: selectionService.get ? selectionService.get().map((el: any) => ({ id: el.id, type: el.type })) : 'no get method'
+                });
+
+                // Prevent clearing selection if current selection contains a task
+                if (!arg || (Array.isArray(arg) && arg.length === 0)) {
+                  const currentSelection = selectionService.get && selectionService.get();
+                  if (currentSelection && currentSelection.length > 0) {
+                    const primary = currentSelection[0];
+                    if (primary && primary.businessObject &&
+                        (primary.businessObject.$type === 'bpmn:UserTask' ||
+                         primary.businessObject.$type === 'bpmn:ServiceTask' ||
+                         primary.businessObject.$type === 'bpmn:BusinessRuleTask' ||
+                         primary.businessObject.$type === 'bpmn:ReceiveTask' ||
+                         primary.businessObject.$type === 'bpmn:SendTask' ||
+                         primary.businessObject.$type === 'bpmn:ManualTask' ||
+                         primary.businessObject.$type === 'bpmn:ScriptTask')) {
+                      console.log('🛡️ BLOCKING selection clear - task currently selected:', {
+                        taskId: primary.id,
+                        taskType: primary.businessObject.$type,
+                        taskName: primary.businessObject.name
+                      });
+                      return; // Don't clear selection
+                    }
+                  }
+                }
+
+                console.log('✅ Allowing selection change');
+              } catch (e) {
+                console.warn('🔔 selection.select logging failed', e);
+              }
+              return origSelect(...args);
+            };
+            (selectionService as any).__wrappedForDebug = true;
+          }
+        } catch (e) {
+          console.warn('⚠️ Could not wrap selection service for debug', e);
+        }
         
         // Create a debounced function to prevent excessive events
         let dirtyChangeTimeout: NodeJS.Timeout | null = null;
@@ -187,100 +244,52 @@ const BpmnModelerComponent: React.FC<BpmnModelerProps> = ({
             console.log('🔄 Debounced dirty change');
             onDirtyChange(true);
           }, 150); // 150ms debounce
-        };
-        
-        // Listen for element selection changes - simple and clean
+        };        // Listen for element selection changes
         eventBus.on('selection.changed', (event: any) => {
           const { newSelection } = event;
-          
-          if (newSelection && newSelection.length > 0) {
-            const selectedElement = newSelection[0];
-            setSelectedElement(selectedElement);
-            console.log('✅ Selected:', selectedElement.type, selectedElement.id);
-          } else {
-            setSelectedElement(null);
-            console.log('❌ No selection');
+          console.log('🎯 selection.changed event fired:', {
+            newSelectionCount: newSelection?.length || 0,
+            newSelection: newSelection?.map((el: any) => ({
+              id: el.id,
+              type: el.type,
+              businessObjectType: el.businessObject?.$type,
+              name: el.businessObject?.name
+            })) || []
+          });
+          try {
+            if (newSelection && newSelection.length > 0) {
+              const primary = newSelection[0];
+              setSelectedElement(primary);
+              // Ensure the properties panel remains attached to our container and refreshes
+              try {
+                if (newModeler) {
+                  const propertiesPanelSvc = newModeler.get('propertiesPanel');
+                  if (propertiesPanelSvc && propertiesPanelRef.current) {
+                    propertiesPanelSvc.attachTo(propertiesPanelRef.current);
+                  }
+                }
+              } catch (e) { /* noop */ }
+            } else {
+              setSelectedElement(null);
+            }
+          } catch (e) {
+            console.warn('⚠️ selection.changed handler error:', e);
           }
-        });
-
-        // Listen for element clicks (for debugging only)
-        eventBus.on('element.click', (event: any) => {
-          console.log('👆 Clicked:', event.element?.type, event.element?.id);
-        });
-
-        // Primary change detection - command stack is the most reliable
+        });        // Primary change detection - command stack is the most reliable
         eventBus.on('commandStack.changed', () => {
-          console.log('� Command stack changed - diagram was modified');
           debouncedDirtyChange();
         });
 
         // Backup change detection for edge cases  
         eventBus.on('elements.changed', () => {
-          console.log('� Elements changed event');
           debouncedDirtyChange();
         });
 
-        // Add debug helper for properties panel
-        (window as any).__debug_properties_panel = () => {
-          try {
-            if (newModeler) {
-              const propertiesPanel = newModeler.get('propertiesPanel');
-              const selection = newModeler.get('selection');
-              const currentSelection = selection.get();
-              
-              console.log('🔍 Properties Panel Debug:');
-              console.log('  - Properties Panel Service:', !!propertiesPanel);
-              console.log('  - Current Selection:', currentSelection?.map((el: any) => ({ id: el.id, type: el.type, businessObject: el.businessObject?.$type })));
-              console.log('  - Properties Panel Container:', propertiesPanelRef.current);
-              console.log('  - Properties Panel Container Content:', propertiesPanelRef.current?.innerHTML.substring(0, 200));
-              
-              if (propertiesPanel) {
-                console.log('  - Properties Panel Methods:', Object.getOwnPropertyNames(Object.getPrototypeOf(propertiesPanel)));
-              }
-            }
-          } catch (e) {
-            console.error('Properties panel debug failed:', e);
-          }
-        };
-        
-        console.log('🛠️ Debug helper available: __debug_properties_panel()');
         console.log('✅ Event listeners attached successfully');
 
         // Set the modeler ref
         modelerRef.current = newModeler;
         console.log('✅ Modeler ref set successfully');
-
-        // Force properties panel initialization and connection to selection
-        try {
-          const propertiesPanel = newModeler.get('propertiesPanel');
-          const selection = newModeler.get('selection');
-          
-          console.log('🔧 Properties panel service:', !!propertiesPanel);
-          console.log('🔧 Selection service:', !!selection);
-          
-          // Ensure properties panel is properly attached
-          if (propertiesPanel && propertiesPanelRef.current) {
-            console.log('✅ Properties panel found and container ready');
-            
-            // Force a selection change to initialize the properties panel
-            setTimeout(() => {
-              try {
-                if (newModeler) {
-                  const rootElement = newModeler.get('canvas').getRootElement();
-                  if (rootElement) {
-                    selection.select([]);
-                    selection.select([rootElement]);
-                    console.log('✅ Initial properties panel selection set');
-                  }
-                }
-              } catch (e) {
-                console.warn('⚠️ Could not set initial properties panel selection:', e);
-              }
-            }, 100);
-          }
-        } catch (e) {
-          console.warn('⚠️ Properties panel initialization check failed:', e);
-        }
         // Ensure the viewport fits the canvas after initialization
         try {
           await zoomSafely(newModeler, 'fit-viewport');
@@ -307,7 +316,8 @@ const BpmnModelerComponent: React.FC<BpmnModelerProps> = ({
         // Handle initial content based on props
         if (initialXml) {
           console.log('📄 Loading initial XML...');
-          await importXmlSafely(newModeler, initialXml, 'initial-load');
+          const xmlWithNs = ensureCamundaNamespace(initialXml);
+          await importXmlSafely(newModeler, xmlWithNs, 'initial-load');
           onDirtyChange(false);
         } else if (autoCreateDiagram) {
           console.log('🆕 Auto-creating new diagram...');
@@ -344,7 +354,6 @@ const BpmnModelerComponent: React.FC<BpmnModelerProps> = ({
       // Destroy the modeler instance and clean up any leftover DOM
       try {
         if (newModeler && typeof newModeler.destroy === 'function') {
-          console.log('🧹 Cleaning up BPMN modeler (local)...');
           try { newModeler.destroy(); } catch (destroyErr) { console.warn('⚠️ Error during modeler cleanup:', destroyErr); }
         }
       } catch (e) {
@@ -395,32 +404,32 @@ const BpmnModelerComponent: React.FC<BpmnModelerProps> = ({
           console.log('❌ No modeler available');
           return;
         }
-        
+
         try {
           const elementRegistry = modeler.get('elementRegistry');
           const canvas = modeler.get('canvas');
           const elements = elementRegistry.getAll();
-          
+
           console.log('🔍 BPMN Debug Check:');
           console.log('📊 Elements in registry:', elements.length);
           console.log('📊 Elements details:', elements.map((el: any) => ({ id: el.id, type: el.type })));
           console.log('🎨 Canvas viewbox:', canvas.viewbox());
           console.log('🎨 Canvas zoom:', canvas.zoom());
-          
+
           const rootElement = canvas.getRootElement();
           console.log('🌳 Root element:', rootElement);
-          
+
           // Check DOM rendering
           const canvasContainer = canvas.getContainer();
           const svgElement = canvasContainer?.querySelector('svg');
           const shapeElements = canvasContainer?.querySelectorAll('[data-element-id]');
-          
+
           console.log('🖼️ DOM RENDERING CHECK:');
           console.log('  - Canvas container:', canvasContainer);
           console.log('  - SVG element:', svgElement);
           console.log('  - SVG dimensions:', svgElement ? `${svgElement.getAttribute('width')}x${svgElement.getAttribute('height')}` : 'No SVG');
           console.log('  - Shape elements found:', shapeElements?.length || 0);
-          
+
           // Check element positions and visibility
           if (shapeElements && shapeElements.length > 0) {
             console.log('  - First 3 shape elements:');
@@ -435,7 +444,7 @@ const BpmnModelerComponent: React.FC<BpmnModelerProps> = ({
               });
             });
           }
-          
+
           return {
             elementsCount: elements.length,
             elements: elements,
@@ -469,19 +478,19 @@ const BpmnModelerComponent: React.FC<BpmnModelerProps> = ({
               const canvasContainer = canvas.getContainer();
               const svgElement = canvasContainer?.querySelector('svg');
               const shapeElements = canvasContainer?.querySelectorAll('[data-element-id]');
-              
+
               // Force container refresh
               if (canvasContainer) {
                 canvasContainer.style.transform = 'translateZ(0)';
                 setTimeout(() => canvasContainer.style.transform = '', 50);
               }
-              
+
               // Force SVG refresh
               if (svgElement) {
                 svgElement.style.opacity = '0.99';
                 setTimeout(() => svgElement.style.opacity = '1', 50);
               }
-              
+
               // Force shape visibility
               if (shapeElements) {
                 Array.from(shapeElements).forEach((el: any) => {
@@ -490,7 +499,7 @@ const BpmnModelerComponent: React.FC<BpmnModelerProps> = ({
                   el.style.display = 'block';
                 });
               }
-              
+
               canvas.zoom('fit-viewport');
               console.log('✅ Visibility forced!');
             }
@@ -500,22 +509,18 @@ const BpmnModelerComponent: React.FC<BpmnModelerProps> = ({
           return null;
         }
       };
-      
+
       console.log('🛠️ Debug helper __debug_check() available in console');
     }
-  }, []);
-
-  // Separate effect to handle XML changes without reinitializing modeler
+  }, []);  // Separate effect to handle XML changes without reinitializing modeler
   useEffect(() => {
     // COMPLETELY DISABLE EFFECT DURING MANUAL IMPORTS
     if (isManualImport || manualImportRef.current) {
-      console.log('📥 SKIPPING effect import - manual import in progress');
       return;
     }
     
     // Skip effect if no modeler or XML
     if (!modelerRef.current || !xml || xml === initialXml) {
-      console.log('📥 SKIPPING effect import - no XML change or no modeler');
       return;
     }
     
@@ -523,46 +528,34 @@ const BpmnModelerComponent: React.FC<BpmnModelerProps> = ({
     const now = Date.now();
     if (!window.__lastManualImport) window.__lastManualImport = 0;
     if (now - window.__lastManualImport < 10000) {
-      console.log('📥 SKIPPING effect import - recent manual import detected');
       return;
     }
     
     // Additional check: Don't run if we just imported from URL/file
     if (window.__recent_manual_import === true) {
-      console.log('📥 SKIPPING effect import - manual import flag detected');
       return;
     }
 
     // CHECK XML LENGTH TO PREVENT OVERRIDING LARGE IMPORTS
     if (xml.length < 1000 && window.__lastManualImport && (now - window.__lastManualImport < 30000)) {
-      console.log('📥 SKIPPING effect import - small XML might override recent large import');
-      console.log(`  - Current XML: ${xml.length} chars, Recent manual import: ${(now - window.__lastManualImport)/1000}s ago`);
       return;
     }
-
-    console.log('⚠️ EFFECT IMPORT RUNNING - this might override manual import!');
-    console.log('  - XML length:', xml.length);
-    console.log('  - XML preview:', xml.substring(0, 200));
-    console.log('  - Initial XML length:', initialXml?.length || 0);
 
     const importXmlContent = async () => {
       try {
         setIsLoading(true);
         setError('');
-        console.log('📥 Importing XML content via effect...');
         
         await importXmlSafely(modelerRef.current!, xml, 'xml-change');
         
         // Ensure proper viewport fitting after import
         try {
           await zoomSafely(modelerRef.current!, 'fit-viewport');
-          console.log('🔍 Viewport fitted after XML import');
         } catch (e) {
           console.debug('Could not fit viewport after import', e);
         }
         
         onDirtyChange(false);
-        console.log('✅ XML content imported successfully with viewport fitted');
         
       } catch (err: any) {
         console.error('❌ Error importing XML content:', err);
@@ -585,7 +578,6 @@ const BpmnModelerComponent: React.FC<BpmnModelerProps> = ({
   // Helper function to completely clear modeler for import override
   const clearModelerForImport = async (modeler: any, operationType: string) => {
     try {
-      console.log(`🧹 Completely clearing modeler for ${operationType}...`);
       
       // Get core services
       const canvas = modeler.get('canvas');
@@ -594,13 +586,11 @@ const BpmnModelerComponent: React.FC<BpmnModelerProps> = ({
       // Remove root element first
       const rootElement = canvas.getRootElement();
       if (rootElement) {
-        console.log('🗑️ Removing root element:', rootElement.id);
         canvas.removeRootElement();
       }
       
       // Clear element registry completely
       const allElements = elementRegistry.getAll().slice(); // Create copy to avoid modification during iteration
-      console.log('🗑️ Clearing', allElements.length, 'elements from registry');
       
       allElements.forEach((element: any) => {
         try {
@@ -614,10 +604,7 @@ const BpmnModelerComponent: React.FC<BpmnModelerProps> = ({
       });
       
       // Create a completely new diagram to reset internal state
-      console.log('🆕 Creating fresh diagram...');
       await (modeler as any).createDiagram();
-      
-      console.log(`✅ Modeler cleared successfully for ${operationType}`);
       
     } catch (clearError) {
       console.warn(`Could not clear existing diagram, proceeding with ${operationType}:`, clearError);
@@ -703,33 +690,16 @@ const BpmnModelerComponent: React.FC<BpmnModelerProps> = ({
   const handleSave = async () => {
     if (!modelerRef.current) return;
     try {
-      console.log('💾 Starting save process...');
       
       // Force a fresh XML export directly from the modeler
-      console.log('🔄 Forcing fresh XML export from modeler...');
       const freshResult = await (modelerRef.current as any).saveXML({ format: true });
       const freshXml = freshResult.xml || '';
-      
-      console.log('🔍 Fresh XML export results:');
-      console.log('📄 Fresh XML Length:', freshXml.length);
-      console.log('📄 Fresh XML Preview (first 500 chars):', freshXml.substring(0, 500));
-      console.log('📄 Fresh XML Contains elements:', {
-        hasStartEvent: freshXml.includes('startEvent'),
-        hasTask: freshXml.includes('task') || freshXml.includes('Task'),
-        hasEndEvent: freshXml.includes('endEvent'),
-        hasUserTask: freshXml.includes('userTask'),
-        hasServiceTask: freshXml.includes('serviceTask'),
-        hasGateway: freshXml.includes('Gateway') || freshXml.includes('gateway'),
-        hasSequenceFlow: freshXml.includes('sequenceFlow'),
-        elementCount: (freshXml.match(/bpmn:/g) || []).length
-      });
       
       // Use the fresh XML for saving
       const savedXml = freshXml;
       setXml(savedXml);
       
       if (onSave) {
-        console.log('🔍 Calling onSave with fresh XML length:', savedXml.length);
         onSave(savedXml);
       }
       onDirtyChange(false);
@@ -744,7 +714,6 @@ const BpmnModelerComponent: React.FC<BpmnModelerProps> = ({
   const handleSaveAndExecute = async () => {
     if (!modelerRef.current) return;
     try {
-      console.log('🚀 Starting save and execute process...');
       
       // First save the diagram
       const freshResult = await (modelerRef.current as any).saveXML({ format: true });
@@ -815,13 +784,11 @@ const BpmnModelerComponent: React.FC<BpmnModelerProps> = ({
     try {
       setIsLoading(true);
       setError('');
-      console.log('🆕 Creating new diagram via button...');
       
       const newXml = await createDiagramSafely(modelerRef.current);
       setXml(newXml);
       onDirtyChange(false);
       showToast('New diagram created successfully', 'success');
-      console.log('✅ New diagram created via button');
       
     } catch (err: any) {
       console.error('❌ Error creating new diagram via button:', err);
@@ -905,32 +872,6 @@ const BpmnModelerComponent: React.FC<BpmnModelerProps> = ({
     const file = event.target.files?.[0];
     if (!file) return;
 
-    // Early debug - make sure we get here
-    console.log('🎯 FILE IMPORT STARTED');
-    (window as any).__debug_import_started = true;
-    
-    // Add basic debug helper immediately
-    (window as any).__debug_check = () => {
-      console.log('🔍 DEBUG CHECK:');
-      console.log('  - Import started:', (window as any).__debug_import_started);
-      console.log('  - Modeler ref:', modelerRef.current);
-      console.log('  - Container ref:', containerRef.current);
-      console.log('  - Properties panel ref:', propertiesPanelRef.current);
-      
-      if (modelerRef.current) {
-        try {
-          const canvas = modelerRef.current.get('canvas');
-          const elementRegistry = modelerRef.current.get('elementRegistry');
-          console.log('  - Canvas:', canvas);
-          console.log('  - Element registry:', elementRegistry);
-          console.log('  - All elements:', elementRegistry.getAll().map((el: BpmnElement) => ({ id: el.id, type: el.type })));
-        } catch (e) {
-          console.log('  - Error accessing modeler services:', e);
-        }
-      }
-    };
-    console.log('🛠️ Basic debug helper available: __debug_check()');
-
     setIsImporting(true);
     setIsManualImport(true);
     manualImportRef.current = true;
@@ -951,178 +892,31 @@ const BpmnModelerComponent: React.FC<BpmnModelerProps> = ({
       console.log('Successfully loaded file content, length:', xmlContent.length);
 
       // Validate and normalize the BPMN XML
-      console.log('🔍 VALIDATING XML...');
-      const normalizedXml = validateAndNormalizeBpmnXml(xmlContent);
-      console.log('✅ XML VALIDATION PASSED');
+  const normalizedXml = ensureCamundaNamespace(validateAndNormalizeBpmnXml(xmlContent));
 
       // Import the XML directly into the modeler (like the working version)
       if (!modelerRef.current) {
         throw new Error('BPMN Modeler not initialized');
       }
 
-      console.log('🧹 STARTING MODELER CLEAR...');
       // Completely clear the modeler for override import
       await clearModelerForImport(modelerRef.current, 'file import');
-      console.log('✅ MODELER CLEARED');
       
-      // Try the working approach - recreate modeler if clearing fails
-      let currentModeler = modelerRef.current;
-      try {
-        console.log('📥 Importing XML directly (override mode)...');
-        console.log('📄 XML to import (first 500 chars):', normalizedXml.substring(0, 500));
-        
-        // Add debugging to global window for browser inspection
-        (window as any).__debug_bpmn_import = {
-          modeler: currentModeler,
-          xml: normalizedXml,
-          container: containerRef.current,
-          propertiesPanel: propertiesPanelRef.current
-        };
-        
-        await (currentModeler as any).importXML(normalizedXml);
-        console.log('BPMN XML imported successfully from file');
-        
-        // Detailed debugging after import
-        const canvas = currentModeler.get('canvas');
-        const elementRegistry = currentModeler.get('elementRegistry');
-        const rootElement = canvas.getRootElement();
-        
-        console.log('🔍 POST-IMPORT DEBUG:');
-        console.log('  - Root element:', rootElement);
-        console.log('  - Root element ID:', rootElement?.id);
-        console.log('  - Root element type:', rootElement?.type);
-        console.log('  - Canvas viewbox:', canvas.viewbox ? canvas.viewbox() : 'No viewbox');
-        console.log('  - Canvas zoom:', canvas.zoom ? canvas.zoom() : 'No zoom method');
-        
-        // Check DOM structure
-        const canvasContainer = canvas.getContainer();
-        const svgElement = canvasContainer?.querySelector('svg');
-        const gElements = canvasContainer?.querySelectorAll('g');
-        
-        console.log('🖼️ DOM STRUCTURE:');
-        console.log('  - Canvas container:', canvasContainer);
-        console.log('  - Canvas container HTML:', canvasContainer?.innerHTML?.substring(0, 200));
-        console.log('  - SVG element found:', !!svgElement);
-        console.log('  - SVG dimensions:', svgElement ? `${svgElement.getAttribute('width')}x${svgElement.getAttribute('height')}` : 'N/A');
-        console.log('  - Number of <g> elements:', gElements?.length || 0);
-        
-        // Check if elements are positioned correctly
-        const shapeElements = canvasContainer?.querySelectorAll('[data-element-id]');
-        console.log('  - Shape elements with data-element-id:', shapeElements?.length || 0);
-        
-        if (shapeElements && shapeElements.length > 0) {
-          Array.from(shapeElements).slice(0, 3).forEach((el, i) => {
-            console.log(`  - Shape ${i}:`, {
-              id: (el as Element).getAttribute('data-element-id'),
-              transform: (el as Element).getAttribute('transform'),
-              visibility: getComputedStyle(el as Element).visibility,
-              display: getComputedStyle(el as Element).display
-            });
-          });
-        }
-        
-        // Add debug info to global
-        (window as any).__debug_bpmn_post_import = {
-          canvas,
-          elementRegistry,
-          rootElement,
-          canvasContainer,
-          svgElement,
-          shapeElements: Array.from(shapeElements || [])
-        };
-        
-        // Add debug helpers to window for browser console
-        (window as any).__debug_bpmn_helpers = {
-          forceRedraw: () => {
-            console.log('🔄 Forcing canvas redraw...');
-            canvas.viewbox(canvas.viewbox());
-            canvas.resize();
-          },
-          zoomToFit: () => {
-            console.log('🔍 Zooming to fit...');
-            canvas.zoom('fit-viewport');
-          },
-          showElements: () => {
-            const elements = elementRegistry.getAll();
-            console.log('📊 All elements:', elements.map((el: BpmnElement) => ({ id: el.id, type: el.type, x: el.x, y: el.y, width: el.width, height: el.height })));
-          },
-          checkVisibility: () => {
-            const shapes = canvasContainer?.querySelectorAll('[data-element-id]');
-            console.log('👁️ Element visibility:');
-            Array.from(shapes || []).forEach(el => {
-              const style = getComputedStyle(el as Element);
-              console.log(`  ${(el as Element).getAttribute('data-element-id')}: visible=${style.visibility}, display=${style.display}, opacity=${style.opacity}`);
-            });
-          }
-        };
-        
-        console.log('🛠️ DEBUG HELPERS AVAILABLE:');
-        console.log('  __debug_bpmn_helpers.forceRedraw() - Force canvas redraw');
-        console.log('  __debug_bpmn_helpers.zoomToFit() - Zoom to fit viewport');
-        console.log('  __debug_bpmn_helpers.showElements() - Show all elements');
-        console.log('  __debug_bpmn_helpers.checkVisibility() - Check element visibility');
-      } catch (importError) {
-        console.warn('❌ DIRECT IMPORT FAILED, RECREATING MODELER:', importError);
-        
-        // Destroy current modeler and create new one (like working code)
-        currentModeler.destroy();
-        
-        // Create a fresh modeler
-        const newModeler = await initializeModelerSafely(
-          containerRef.current!,
-          propertiesPanelRef.current!,
-          showMinimap ? minimapRef.current : null,
-          [
-            BpmnPropertiesPanelModule,
-            BpmnPropertiesProviderModule,
-            CamundaPlatformPropertiesProviderModule,
-            ColorPickerModule,
-            ...(showMinimap ? [MinimapModule] : [])
-          ],
-          {
-            camunda: camundaModdleDescriptor
-          },
-          false
-        );
-        
-        if (!newModeler) {
-          throw new Error('Failed to recreate modeler instance');
-        }
-        
-        modelerRef.current = newModeler;
-        currentModeler = newModeler;
-        
-        // Now import with fresh modeler
-        await (currentModeler as any).importXML(normalizedXml);
-        console.log('BPMN XML imported successfully with recreated modeler');
-      }
+      // Import the XML directly
+      await (modelerRef.current as any).importXML(normalizedXml);
       
       // Force canvas refresh and ensure elements are visible
-      const canvas = currentModeler.get('canvas');
-      const elementRegistry = currentModeler.get('elementRegistry');
-      
-      // Log what was imported
-      const importedElements = elementRegistry.getAll();
-      console.log('📊 Imported elements count:', importedElements.length);
-      console.log('📊 Imported elements:', importedElements.map((el: any) => ({ id: el.id, type: el.type })));
+      const canvas = modelerRef.current.get('canvas');
+      const elementRegistry = modelerRef.current.get('elementRegistry');
       
       // Force canvas to refresh/redraw
       if (canvas.viewbox) {
         canvas.viewbox(canvas.viewbox());
-      }
-      
-      // Check canvas DOM content for file import
-      const canvasContainer = canvas.getContainer();
-      console.log('🖼️ File Import - Canvas container:', canvasContainer);
-      console.log('🖼️ File Import - Canvas container children:', canvasContainer?.children?.length || 0);
-      console.log('🖼️ File Import - Canvas SVG content:', canvasContainer?.querySelector('svg') ? 'Found SVG' : 'No SVG found');
-      
-      // Zoom to fit the viewport with delay to ensure DOM is ready
+      }      // Zoom to fit the viewport with delay to ensure DOM is ready
       setTimeout(async () => {
         try {
-          const canvas = currentModeler.get('canvas');
+          const canvas = modelerRef.current!.get('canvas');
           canvas.zoom('fit-viewport');
-          console.log('🔍 Viewport fitted after file import');
           
           // Force a redraw
           canvas.resize();
@@ -1136,12 +930,12 @@ const BpmnModelerComponent: React.FC<BpmnModelerProps> = ({
       
       // Force properties panel refresh with delay
       setTimeout(() => {
-        const eventBus = currentModeler.get('eventBus');
+        const eventBus = modelerRef.current!.get('eventBus');
         eventBus.fire('selection.changed', { newSelection: [] });
       }, 100);
       
       // Update the XML state
-      const { xml: importedXml } = await (currentModeler as any).saveXML({ format: true });
+      const { xml: importedXml } = await (modelerRef.current as any).saveXML({ format: true });
       setXml(importedXml || '');
       
       // Clear error state and ensure clean display
@@ -1219,13 +1013,11 @@ const BpmnModelerComponent: React.FC<BpmnModelerProps> = ({
     setError('');
 
     try {
-      console.log('Attempting to import from URL:', importUrl);
       
       let xmlContent = '';
       
       // Try direct fetch first (for same-origin or CORS-enabled URLs)
       try {
-        console.log('Trying direct fetch...');
         const response = await fetch(importUrl, {
           method: 'GET',
           headers: {
@@ -1239,15 +1031,12 @@ const BpmnModelerComponent: React.FC<BpmnModelerProps> = ({
         }
 
         xmlContent = await response.text();
-        console.log('Direct fetch successful');
         
       } catch (directFetchError) {
-        console.log('Direct fetch failed, trying proxy approach:', directFetchError);
         
         // Use our proxy API for CORS-blocked URLs
         try {
           const proxyUrl = `/api/proxy-bpmn?url=${encodeURIComponent(importUrl)}`;
-          console.log('Using proxy URL:', proxyUrl);
           
           const proxyResponse = await fetch(proxyUrl, {
             method: 'GET',
@@ -1262,7 +1051,6 @@ const BpmnModelerComponent: React.FC<BpmnModelerProps> = ({
           }
 
           xmlContent = await proxyResponse.text();
-          console.log('Proxy fetch successful');
           
         } catch (proxyError) {
           console.error('Proxy fetch also failed:', proxyError);
@@ -1279,10 +1067,8 @@ const BpmnModelerComponent: React.FC<BpmnModelerProps> = ({
         throw new Error('The URL did not return valid XML content');
       }
 
-      console.log('Successfully fetched XML content, length:', xmlContent.length);
-
       // Validate and normalize the BPMN XML
-      const normalizedXml = validateAndNormalizeBpmnXml(xmlContent);
+  const normalizedXml = ensureCamundaNamespace(validateAndNormalizeBpmnXml(xmlContent));
 
       // Import the XML directly into the modeler (like the working version)
       if (!modelerRef.current) {
@@ -1299,21 +1085,11 @@ const BpmnModelerComponent: React.FC<BpmnModelerProps> = ({
       window.__recent_manual_import = true;  // Additional protection
       
       // Import the XML directly (bypass safe import for override behavior)
-      console.log('📥 Importing XML directly (override mode)...');
       await (modelerRef.current as any).importXML(normalizedXml);
-      console.log('BPMN XML imported successfully from URL');
       
       // Force canvas refresh and ensure elements are visible
       const canvas = modelerRef.current.get('canvas');
       const elementRegistry = modelerRef.current.get('elementRegistry');
-      
-      // Log what was imported
-      const importedElements = elementRegistry.getAll();
-      console.log('📊 Imported elements count:', importedElements.length);
-      console.log('📊 Imported elements:', importedElements.map((el: any) => ({ id: el.id, type: el.type })));
-      
-      // AGGRESSIVE RENDERING FIX - Force visibility and redraw
-      console.log('🎨 FORCING DIAGRAM VISIBILITY...');
       
       // 1. Force multiple redraws with delays
       const forceRedraw = async () => {
@@ -1383,8 +1159,6 @@ const BpmnModelerComponent: React.FC<BpmnModelerProps> = ({
         }, 100);
       }
       
-      console.log('✅ VISIBILITY FORCED - diagram should now be visible');
-      
       // Force canvas to refresh/redraw
       if (canvas.viewbox) {
         canvas.viewbox(canvas.viewbox());
@@ -1394,16 +1168,13 @@ const BpmnModelerComponent: React.FC<BpmnModelerProps> = ({
       setTimeout(async () => {
         try {
           const canvas = modelerRef.current!.get('canvas');
-          console.log('🎯 Starting viewport fitting...');
           
           canvas.zoom('fit-viewport');
-          console.log('🔍 Viewport fitted after URL import');
           
           // Force a canvas refresh (no resize method, use alternative)
           try {
             const eventBus = modelerRef.current!.get('eventBus');
             eventBus.fire('canvas.resized');
-            console.log('🎨 Canvas refresh triggered');
           } catch (e) {
             console.debug('Canvas refresh not available', e);
           }
@@ -1413,7 +1184,6 @@ const BpmnModelerComponent: React.FC<BpmnModelerProps> = ({
             setIsManualImport(false);
             manualImportRef.current = false;
             window.__recent_manual_import = false;  // Clear additional protection
-            console.log('🔄 Manual import flags cleared');
           }, 5000);  // Extended to 5 seconds
           
         } catch (e) {
@@ -1423,7 +1193,6 @@ const BpmnModelerComponent: React.FC<BpmnModelerProps> = ({
             setIsManualImport(false);
             manualImportRef.current = false;
             window.__recent_manual_import = false;  // Clear additional protection
-            console.log('🔄 Manual import flags cleared (after error)');
           }, 5000);  // Extended to 5 seconds
         }
       }, 500);
@@ -1483,8 +1252,6 @@ const BpmnModelerComponent: React.FC<BpmnModelerProps> = ({
   const handleAutoImport = async (url: string, modelerInstance: BpmnModeler) => {
     if (!url.trim() || !modelerInstance) return;
 
-    console.log('🔗 Auto-importing BPMN from URL:', url);
-    
     try {
       // Validate URL format
       const validUrl = new URL(url.trim());
@@ -1515,13 +1282,11 @@ const BpmnModelerComponent: React.FC<BpmnModelerProps> = ({
         throw new Error('Response does not appear to be valid XML content');
       }
 
-      console.log('🔗 Auto-import: BPMN XML fetched successfully, importing safely...');
-      
-      // Use our safe import function
-      await importXmlSafely(modelerInstance, xmlData, 'auto-import');
-      setXml(xmlData);
-      
-      console.log('✅ Auto-import: BPMN imported successfully');
+  // Ensure camunda namespace
+  const xmlWithNs = ensureCamundaNamespace(xmlData);
+  // Use our safe import function
+  await importXmlSafely(modelerInstance, xmlWithNs, 'auto-import');
+  setXml(xmlWithNs);
       
     } catch (error) {
       console.error('❌ Error auto-importing BPMN from URL:', error);

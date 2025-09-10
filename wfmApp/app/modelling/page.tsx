@@ -68,12 +68,21 @@ export default function ModellingPage() {
             if (processesResponse.data) {
               setProcesses(processesResponse.data);
             } else if (processesResponse.error) {
-              setError(processesResponse.error);
+              setProcesses([]);
+              toast({
+                type: 'foreground',
+                title: 'Unable to reach backend or database. Please check your connection or try again later.'
+              });
+              return; // Exit early so outer catch doesn't trigger
             }
           } catch (err) {
-            // If there's an error, just set empty processes instead of throwing
             setProcesses([]);
+            toast({
+              type: 'foreground',
+              title: 'Unable to reach backend or database. Please check your connection or try again later.'
+            });
             console.log('No processes found or error occurred:', err);
+            return; // Exit early so outer catch doesn't trigger
           }
           break;
           

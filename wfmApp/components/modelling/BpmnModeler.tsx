@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
+import { useOfflineContext } from '@/context/OfflineContext';
 import { processApiService } from '@/services/processApi';
 import { workflowApiService } from '@/services/workflowApi';
 import BpmnModeler from 'bpmn-js/lib/Modeler';
@@ -63,11 +64,21 @@ const BpmnModelerComponent: React.FC<BpmnModelerProps> = ({
   const [importMethod, setImportMethod] = useState<'url' | 'file'>('url');
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [toast, setToast] = useState<{message: string, type: 'success' | 'error' | 'info'} | null>(null);
+  const [conflictModal, setConflictModal] = useState<null | { local: any; remote: any; onResolve: (action: 'overwrite' | 'skip' | 'merge' | 'rename', opts?: { newFilename?: string }) => void }>(null);
+  const [diffPreview, setDiffPreview] = useState<{
+    added: number;
+    removed: number;
+    changed: number;
+    summary: string;
+    localOnly?: number;
+    remoteOnly?: number;
+  } | null>(null);
   const [isManualImport, setIsManualImport] = useState(false);
   const manualImportRef = useRef(false);
   // Offline + sync state (added)
-  const [backendOnline, setBackendOnline] = useState<boolean>(true);
-  const [pendingSyncs, setPendingSyncs] = useState<{ key: string; filename: string; xml: string; created: number }[]>([]);
+  const offlineCtx = (() => { try { return useOfflineContext(); } catch { return null; } })();
+  const [backendOnline, setBackendOnline] = useState<boolean>(offlineCtx?.backendOnline ?? true);
+  const [pendingSyncs, setPendingSyncs] = useState<PendingSyncItem[]>([]);
   const [lastSyncAttempt, setLastSyncAttempt] = useState<number | null>(null);
   const retryIntervalRef = useRef<NodeJS.Timeout | null>(null);
   // Forward declarations for sync logic (defined after function bodies for clarity)
@@ -90,7 +101,289 @@ const BpmnModelerComponent: React.FC<BpmnModelerProps> = ({
   const tempStoreFailureRef = useRef<number>(0); // count consecutive failures
   const TEMP_STORE_FAILURE_SILENCE_AFTER = 1; // after first shown failure, silence subsequent ones
   const initialOffline = process.env.NEXT_PUBLIC_BPMN_OFFLINE_MODE === 'true';
-  const [offlineModeActive, setOfflineModeActive] = useState<boolean>(initialOffline);
+  const [offlineModeActive, setOfflineModeActive] = useState<boolean>(offlineCtx?.offlineModeActive ?? initialOffline);
+  // Queue config / feature flags
+  const QUEUE_MAX_SIZE = parseInt(process.env.NEXT_PUBLIC_QUEUE_MAX_SIZE || '20', 10);
+  const QUEUE_COMPRESSION = process.env.NEXT_PUBLIC_QUEUE_COMPRESSION === 'true';
+  const QUEUE_ENCRYPTION = process.env.NEXT_PUBLIC_QUEUE_ENCRYPTION === 'true';
+  const QUEUE_STORAGE_KEY_V1 = 'bpmn_pending_syncs';
+  const QUEUE_STORAGE_KEY_V2 = 'bpmn_pending_syncs_v2';
+
+  interface PendingSyncMeta {
+    compressed?: boolean;
+    encrypted?: boolean;
+    algo?: string; // compression algo
+    iv?: string;   // base64 IV for encryption
+    hash?: string; // sha256 of original xml
+    version?: number; // schema version
+  }
+
+  type PendingSyncItem = { key: string; filename: string; xml: string; created: number; meta?: PendingSyncMeta };
+
+  // Utility: base64 helpers
+  const toBase64 = (bytes: Uint8Array) => (typeof window === 'undefined') ? '' : window.btoa(String.fromCharCode(...bytes));
+  const fromBase64 = (b64: string) => {
+    if (typeof window === 'undefined') return new Uint8Array();
+    const bin = window.atob(b64);
+    const arr = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+    return arr;
+  };
+
+  // Utility: compute SHA-256 hash (hex)
+  const sha256 = async (data: string): Promise<string> => {
+    if (typeof window === 'undefined' || !window.crypto?.subtle) return '';
+    const enc = new TextEncoder().encode(data);
+    const digest = await window.crypto.subtle.digest('SHA-256', enc);
+    return Array.from(new Uint8Array(digest)).map(b => b.toString(16).padStart(2, '0')).join('');
+  };
+
+  // Encryption: server-assisted key (fallback to local if server unavailable)
+  const ensureEncryptionKey = async (): Promise<CryptoKey | null> => {
+    if (!QUEUE_ENCRYPTION) return null;
+    if (typeof window === 'undefined' || !window.crypto?.subtle) return null;
+    const stored = localStorage.getItem('bpmn_queue_enc_key_v2_server');
+    if (stored) {
+      try {
+        const jwk = JSON.parse(stored);
+        return await window.crypto.subtle.importKey('jwk', jwk, { name: 'AES-GCM' }, false, ['encrypt', 'decrypt']);
+      } catch { /* ignore */ }
+    }
+    // Try server endpoint
+    try {
+      const resp = await fetch('/api/security/encryption-key');
+      if (resp.ok) {
+        const data = await resp.json();
+        if (data?.key) {
+          localStorage.setItem('bpmn_queue_enc_key_v2_server', JSON.stringify(data.key));
+          return await window.crypto.subtle.importKey('jwk', data.key, { name: 'AES-GCM' }, false, ['encrypt', 'decrypt']);
+        }
+      }
+    } catch { /* ignore */ }
+    // Fallback generate local if server failed
+    try {
+      const key = await window.crypto.subtle.generateKey({ name: 'AES-GCM', length: 256 }, true, ['encrypt', 'decrypt']);
+      const jwk = await window.crypto.subtle.exportKey('jwk', key);
+      localStorage.setItem('bpmn_queue_enc_key_v2_server', JSON.stringify(jwk));
+      return key;
+    } catch { return null; }
+  };
+  // --- Semantic BPMN Parsing & Merge ---
+  interface SemanticEl { id: string; type: string; name?: string; documentation?: string; assignee?: string; candidateGroups?: string; candidateUsers?: string; dueDate?: string; extensionsHash?: string; raw: Element; }
+  const hashExtensions = (el: Element): string | undefined => {
+    const ext = Array.from(el.getElementsByTagName('bpmn:extensionElements'))[0];
+    if (!ext) return undefined;
+    // Simple hash via JSON of child tag names+attributes
+    const payload: any[] = [];
+    Array.from(ext.children).forEach(c => {
+      const attrs: Record<string,string> = {};
+      Array.from(c.attributes).forEach(a => attrs[a.name] = a.value);
+      payload.push({ tag: c.tagName, attrs });
+    });
+    try { return btoa(unescape(encodeURIComponent(JSON.stringify(payload)))); } catch { return undefined; }
+  };
+
+  const parseSemantic = (xml: string): Map<string, SemanticEl> => {
+    const map = new Map<string, SemanticEl>();
+    try {
+      const doc = new DOMParser().parseFromString(xml, 'application/xml');
+      if (doc.getElementsByTagName('parsererror').length) return map;
+      const collect = (el: Element) => {
+        const id = el.getAttribute('id');
+        if (id) {
+          const name = el.getAttribute('name') || undefined;
+          // documentation child
+          let documentation: string | undefined;
+          const docs = el.getElementsByTagName('bpmn:documentation');
+            if (docs && docs.length) documentation = docs[0].textContent || undefined;
+          // camunda:assignee attribute
+          const assignee = el.getAttribute('camunda:assignee') || undefined;
+          const candidateGroups = el.getAttribute('camunda:candidateGroups') || undefined;
+          const candidateUsers = el.getAttribute('camunda:candidateUsers') || undefined;
+          const dueDate = el.getAttribute('camunda:dueDate') || undefined;
+          const extensionsHash = hashExtensions(el);
+          map.set(id, { id, type: el.tagName, name, documentation, assignee, candidateGroups, candidateUsers, dueDate, extensionsHash, raw: el });
+        }
+        Array.from(el.children).forEach(c => collect(c as Element));
+      };
+      collect(doc.documentElement);
+    } catch { /* ignore */ }
+    return map;
+  };
+
+  const semanticMerge = (localXml: string, remoteXml: string): { merged: string; diffMeta: any } => {
+    try {
+      const parser = new DOMParser();
+      const localDoc = parser.parseFromString(localXml, 'application/xml');
+      const remoteDoc = parser.parseFromString(remoteXml, 'application/xml');
+      if (localDoc.getElementsByTagName('parsererror').length) return { merged: localXml, diffMeta: {} };
+      if (remoteDoc.getElementsByTagName('parsererror').length) return { merged: localXml, diffMeta: {} };
+      const lMap = parseSemantic(localXml); const rMap = parseSemantic(remoteXml);
+      const defs = localDoc.documentElement;
+  const added: string[] = []; const modified: string[] = []; const remoteOnly: string[] = []; const assigneeFilled: string[] = []; const extensionsImported: string[] = []; const candidateGroupsFilled: string[] = []; const candidateUsersFilled: string[] = []; const dueDateFilled: string[] = [];
+      // Merge remote-only
+      rMap.forEach((val, id) => { if (!lMap.has(id)) { try { defs.appendChild(localDoc.importNode(val.raw, true)); added.push(id); } catch {} } });
+      // Reconcile properties for overlapping
+      lMap.forEach((lVal, id) => {
+        const rVal = rMap.get(id);
+        if (!rVal) return;
+        let changed = false;
+        if (rVal.name && rVal.name !== lVal.name) {
+          if (!lVal.name) { lVal.raw.setAttribute('name', rVal.name); changed = true; }
+        }
+        if (rVal.documentation && !lVal.documentation) {
+            const docEl = localDoc.createElement('bpmn:documentation');
+            docEl.textContent = rVal.documentation;
+            lVal.raw.appendChild(docEl); changed = true;
+        }
+  if (rVal.assignee && !lVal.assignee) { lVal.raw.setAttribute('camunda:assignee', rVal.assignee); changed = true; assigneeFilled.push(id); }
+  if (rVal.candidateGroups && !lVal.candidateGroups) { lVal.raw.setAttribute('camunda:candidateGroups', rVal.candidateGroups); changed = true; candidateGroupsFilled.push(id); }
+  if (rVal.candidateUsers && !lVal.candidateUsers) { lVal.raw.setAttribute('camunda:candidateUsers', rVal.candidateUsers); changed = true; candidateUsersFilled.push(id); }
+  if (rVal.dueDate && !lVal.dueDate) { lVal.raw.setAttribute('camunda:dueDate', rVal.dueDate); changed = true; dueDateFilled.push(id); }
+        if (rVal.extensionsHash && rVal.extensionsHash !== lVal.extensionsHash) {
+          // Bring over extensionElements if local missing
+          const hasLocalExt = lVal.raw.getElementsByTagName('bpmn:extensionElements').length > 0;
+          if (!hasLocalExt) {
+            const remoteExt = rVal.raw.getElementsByTagName('bpmn:extensionElements')[0];
+            if (remoteExt) {
+              lVal.raw.appendChild(localDoc.importNode(remoteExt, true));
+              changed = true; extensionsImported.push(id);
+            }
+          }
+        }
+        if (changed) modified.push(id);
+      });
+      // Track remote-only for diff meta
+      rMap.forEach((v, id) => { if (!lMap.has(id)) remoteOnly.push(id); });
+      const merged = new XMLSerializer().serializeToString(localDoc);
+  return { merged, diffMeta: { added, modified, remoteOnly, assigneeFilled, extensionsImported, candidateGroupsFilled, candidateUsersFilled, dueDateFilled } };
+    } catch { return { merged: localXml, diffMeta: {} }; }
+  };
+
+  // Visual overlays for diff
+  const applyDiffOverlays = (modeler: BpmnModeler, diff: { added?: string[]; modified?: string[]; remoteOnly?: string[] }) => {
+    try {
+      const overlays = (modeler as any).get('overlays');
+      const elementRegistry = modeler.get('elementRegistry');
+      const addBadge = (id: string, color: string, title: string) => {
+        const el = elementRegistry.get(id); if (!el) return;
+        overlays.add(id, {
+          position: { bottom: 0, right: 0 },
+          html: `<div style="background:${color};color:#fff;padding:2px 4px;border-radius:3px;font-size:9px;opacity:0.85" title="${title}">${title[0]}</div>`
+        });
+      };
+      diff.added?.forEach(id => addBadge(id, '#16a34a', 'Added'));
+      diff.modified?.forEach(id => addBadge(id, '#d97706', 'Changed'));
+      diff.remoteOnly?.forEach(id => addBadge(id, '#dc2626', 'Remote')); // remote only (not in local before merge)
+    } catch { /* ignore */ }
+  };
+
+  const clearDiffOverlays = (modeler: BpmnModeler) => {
+    try { const overlays = (modeler as any).get('overlays'); overlays.clear(); } catch { /* ignore */ }
+  };
+
+  // Audit logging helper
+  const logConflictAction = async (data: { filename: string; action: string; diff?: any }) => {
+    const sessionId = sessionStorage.getItem('sessionId') || 'session';
+    try {
+      fetch('/api/audit/conflicts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...data, sessionId })
+      }).catch(()=>{});
+      // Local copy (append)
+      const localKey = 'bpmn_conflict_audit_v1';
+      const existing = JSON.parse(localStorage.getItem(localKey) || '[]');
+      existing.push({ ts: Date.now(), ...data });
+      if (existing.length > 300) existing.splice(0, existing.length - 300);
+      localStorage.setItem(localKey, JSON.stringify(existing));
+    } catch { /* ignore */ }
+  };
+
+  const encryptString = async (plain: string): Promise<{ b64: string; iv: string } | null> => {
+    if (!QUEUE_ENCRYPTION) return null;
+    const key = await ensureEncryptionKey();
+    if (!key) return null;
+    const iv = crypto.getRandomValues(new Uint8Array(12));
+    const enc = new TextEncoder().encode(plain);
+    const ct = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, enc);
+    return { b64: toBase64(new Uint8Array(ct)), iv: toBase64(iv) };
+  };
+
+  const decryptString = async (payloadB64: string, ivB64: string): Promise<string> => {
+    const key = await ensureEncryptionKey();
+    if (!key) return '';
+    const iv = fromBase64(ivB64);
+    const data = fromBase64(payloadB64);
+    const pt = await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, key, data);
+    return new TextDecoder().decode(pt);
+  };
+
+  // Compression helpers (CompressionStream API only; graceful fallback)
+  const compressIfNeeded = async (text: string): Promise<{ encoded: string; algo?: string; compressed: boolean }> => {
+    if (!QUEUE_COMPRESSION) return { encoded: text, compressed: false };
+    try {
+      if (typeof CompressionStream === 'undefined') return { encoded: text, compressed: false };
+      const cs = new CompressionStream('gzip');
+      const writer = (cs.writable as any).getWriter();
+      await writer.write(new TextEncoder().encode(text));
+      await writer.close();
+      const compressed = await new Response(cs.readable).arrayBuffer();
+      return { encoded: toBase64(new Uint8Array(compressed)), algo: 'gzip', compressed: true };
+    } catch {
+      return { encoded: text, compressed: false };
+    }
+  };
+
+  const decompressIfNeeded = async (payload: PendingSyncItem): Promise<string> => {
+    const meta = payload.meta;
+    if (!meta?.compressed) return payload.xml; // xml field stores raw or encoded depending on compressed flag
+    try {
+      if (typeof DecompressionStream === 'undefined') return payload.xml; // can't decompress
+      const bin = fromBase64(payload.xml);
+  const ds = new DecompressionStream((meta.algo as CompressionFormat) || 'gzip');
+      const writer = (ds.writable as any).getWriter();
+      await writer.write(bin);
+      await writer.close();
+      const buf = await new Response(ds.readable).arrayBuffer();
+      return new TextDecoder().decode(buf);
+    } catch {
+      return payload.xml; // fallback
+    }
+  };
+
+  // Load persisted queue (upgrade v1 to v2)
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    try {
+      const v2 = localStorage.getItem(QUEUE_STORAGE_KEY_V2);
+      if (v2) {
+        const parsed: PendingSyncItem[] = JSON.parse(v2);
+        setPendingSyncs(parsed as any);
+        return;
+      }
+      const legacy = localStorage.getItem(QUEUE_STORAGE_KEY_V1);
+      if (legacy) {
+        const parsed: any[] = JSON.parse(legacy);
+        const upgraded: PendingSyncItem[] = parsed.map(it => ({ ...it, meta: { version: 1 } }));
+        setPendingSyncs(upgraded as any);
+        localStorage.setItem(QUEUE_STORAGE_KEY_V2, JSON.stringify(upgraded));
+      }
+    } catch { /* ignore */ }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Persist queue v2
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    try { localStorage.setItem(QUEUE_STORAGE_KEY_V2, JSON.stringify(pendingSyncs)); } catch { /* ignore */ }
+    offlineCtx?.setPendingSyncCount?.(pendingSyncs.length);
+  }, [pendingSyncs]);
+
+  // Mirror state to context
+  useEffect(() => { offlineCtx?.setBackendOnline?.(backendOnline); }, [backendOnline, offlineCtx]);
+  useEffect(() => { offlineCtx?.setOfflineModeActive?.(offlineModeActive); }, [offlineModeActive, offlineCtx]);
+
   const [queueCollapsed, setQueueCollapsed] = useState<boolean>(() => {
     if (typeof window === 'undefined') return false;
     try { return localStorage.getItem('bpmn_queue_collapsed') === '1'; } catch { return false; }
@@ -650,20 +943,54 @@ const BpmnModelerComponent: React.FC<BpmnModelerProps> = ({
   };
 
   // Store BPMN in Redis temporarily
-  const storeBpmnInRedis = async (xml: string, filename: string) => {
+  const storeBpmnInRedis = async (originalXml: string, filename: string) => {
     // Always ensure a session id (even if remote storage disabled)
     const sessionId = sessionStorage.getItem('sessionId') || `session_${Date.now()}`;
     if (!sessionStorage.getItem('sessionId')) {
       sessionStorage.setItem('sessionId', sessionId);
     }
 
+    // Prepare queued item builder with compression/encryption + hash
+    const prepareQueuedItem = async (xmlForQueue: string): Promise<PendingSyncItem> => {
+      const key = `bpmn_temp_${filename}_${Date.now()}`;
+      const hash = await sha256(xmlForQueue).catch(() => '');
+      // compression
+      const comp = await compressIfNeeded(xmlForQueue);
+      let storedXml = comp.encoded;
+      const meta: PendingSyncMeta = { compressed: comp.compressed, algo: comp.algo, version: 2, hash };
+      // encryption (applied after compression to storedXml)
+      if (QUEUE_ENCRYPTION) {
+        const enc = await encryptString(storedXml);
+        if (enc) {
+          storedXml = enc.b64;
+          meta.encrypted = true;
+          meta.iv = enc.iv;
+        }
+      }
+      return { key, filename, xml: storedXml, created: Date.now(), meta };
+    };
+
+    const enqueue = async (xmlToStore: string) => {
+      const item = await prepareQueuedItem(xmlToStore);
+      // Enforce queue size limit
+      setPendingSyncs(prev => {
+        let next = [...prev];
+        if (next.length >= QUEUE_MAX_SIZE) {
+          const removed = next.shift();
+          showToast(`Queue full (>${QUEUE_MAX_SIZE}), evicted oldest: ${removed?.filename}`, 'info');
+        }
+        next.push(item);
+        return next as any;
+      });
+      try { sessionStorage.setItem(item.key, xmlToStore); } catch { /* ignore */ }
+      console.info('[TempStore][OfflineQueue] Queued diagram for later sync:', item.key);
+      return item;
+    };
+
     // If offline mode active or backend currently offline, queue
     if (offlineModeActive || !backendOnline) {
-      const key = `bpmn_temp_${filename}_${Date.now()}`;
-      try { sessionStorage.setItem(key, xml); } catch {}
-      setPendingSyncs(prev => [...prev, { key, filename, xml, created: Date.now() }]);
-      console.info('[TempStore][OfflineQueue] Queued diagram for later sync:', key);
-      return { key, offline: true, queued: true };
+      const item = await enqueue(originalXml);
+      return { key: item.key, offline: true, queued: true };
     }
 
     // If disabled via env flag, silently fallback to sessionStorage
@@ -676,7 +1003,7 @@ const BpmnModelerComponent: React.FC<BpmnModelerProps> = ({
 
     try {
       const response = await processApiService.storeBpmnTemporarily({
-        xml,
+        xml: originalXml,
         filename,
         // Provide both snake & camel case to support either backend expectation
         session_id: sessionId,
@@ -694,17 +1021,15 @@ const BpmnModelerComponent: React.FC<BpmnModelerProps> = ({
     } catch (error: any) {
       tempStoreFailureRef.current += 1;
       const isConnRefused = /fetch|connrefused|connection refused|econnrefused/i.test(error?.message || '');
-      const key = `bpmn_temp_${filename}_${Date.now()}`;
-      sessionStorage.setItem(key, xml);
-      setPendingSyncs(prev => [...prev, { key, filename, xml, created: Date.now() }]);
+      const item = await enqueue(originalXml);
       setBackendOnline(false);
       setOfflineModeActive(true);
       const baseMsg = isConnRefused ? 'Backend offline, queued locally' : 'Temp storage failed, queued locally';
       if (tempStoreFailureRef.current <= TEMP_STORE_FAILURE_SILENCE_AFTER) {
-        showToast(`${baseMsg}. (key ${key})`, 'error');
+        showToast(`${baseMsg}. (key ${item.key})`, 'error');
       }
-      console.warn('Temporary storage failure (queued):', { error, key });
-      return { key, fallback: true, queued: true };
+      console.warn('Temporary storage failure (queued):', { error, key: item.key });
+      return { key: item.key, fallback: true, queued: true };
     }
   };
 
@@ -718,10 +1043,119 @@ const BpmnModelerComponent: React.FC<BpmnModelerProps> = ({
     }
     setBackendOnline(true);
     const remaining: typeof pendingSyncs = [];
+    // Preload existing remote temp items for conflict detection
+    const sessionId = (sessionStorage.getItem('sessionId') || 'session_sync');
+    let remoteItems: any[] = [];
+    try {
+      const remoteResp = await fetch(`/api/bpmn/temp-store?sessionId=${encodeURIComponent(sessionId)}`);
+      if (remoteResp.ok) {
+        const json = await remoteResp.json();
+        if (json?.data && Array.isArray(json.data)) remoteItems = json.data;
+      }
+    } catch { /* ignore */ }
+    const remoteIndex: Record<string, any> = {};
+    remoteItems.forEach(it => { if (it.filename) remoteIndex[it.filename] = it; });
     for (const item of pendingSyncs) {
       try {
+        // Reconstruct original XML (decompress & decrypt as needed)
+        let originalXml = item.xml;
+        if (item.meta?.encrypted && item.meta?.iv) {
+          try { originalXml = await decryptString(originalXml, item.meta.iv); } catch { /* ignore */ }
+        }
+        if (item.meta?.compressed) {
+          try { originalXml = await decompressIfNeeded(item); } catch { /* ignore */ }
+        }
+        // Conflict detection: if remote with same filename exists, produce diff metrics
+        const remote = remoteIndex[item.filename];
+        if (remote) {
+          const { merged, diffMeta } = semanticMerge(originalXml, remote.xml || '');
+          const added = diffMeta.added?.length || 0;
+          const removed = diffMeta.remoteOnly?.length || 0; // remote-only relative to previous local
+          const changed = diffMeta.modified?.length || 0;
+          const summary = `${added} added, ${removed} remote-only, ${changed} modified elements`;
+          setDiffPreview({ added, removed, changed, summary, localOnly: added, remoteOnly: removed });
+          // Apply overlays (show before modal)
+          if (modelerRef.current) {
+            clearDiffOverlays(modelerRef.current);
+            applyDiffOverlays(modelerRef.current, diffMeta);
+          }
+          // Pause sync and ask user
+          await new Promise<void>((resolve) => {
+            setConflictModal({
+              local: { filename: item.filename, xml: originalXml },
+              remote,
+              onResolve: async (action, opts) => {
+                setConflictModal(null);
+                if (modelerRef.current) clearDiffOverlays(modelerRef.current);
+                if (action === 'skip') {
+                  remaining.push(item); // keep for later retry
+                  logConflictAction({ filename: item.filename, action: 'skip', diff: diffMeta });
+                } else if (action === 'overwrite') {
+                  try {
+                    const res = await processApiService.storeBpmnTemporarily({
+                      xml: originalXml, // local wins
+                      filename: item.filename,
+                      session_id: sessionId,
+                      overwrite: true,
+                    });
+                    if (res.data?.success) {
+                      try { sessionStorage.removeItem(item.key); } catch {}
+                      console.info('[Sync] Overwrote remote diagram', item.filename);
+                      logConflictAction({ filename: item.filename, action: 'overwrite', diff: diffMeta });
+                    } else {
+                      remaining.push(item);
+                    }
+                  } catch {
+                    remaining.push(item);
+                  }
+                } else if (action === 'merge') {
+                  // Semantic merge (preserve remote-only + reconcile basics)
+                  const { merged: mergedXml } = semanticMerge(originalXml, remote.xml || '');
+                  try {
+                    const res = await processApiService.storeBpmnTemporarily({
+                      xml: mergedXml,
+                      filename: item.filename,
+                      session_id: sessionId,
+                      overwrite: true,
+                    });
+                    if (res.data?.success) {
+                      try { sessionStorage.removeItem(item.key); } catch {}
+                      console.info('[Sync] Semantic merged diagram', item.filename);
+                      logConflictAction({ filename: item.filename, action: 'merge', diff: diffMeta });
+                    } else {
+                      remaining.push(item);
+                    }
+                  } catch {
+                    remaining.push(item);
+                  }
+                } else if (action === 'rename') {
+                  const newFilename = opts?.newFilename || `copy_${Date.now()}_${item.filename}`;
+                  try {
+                    const res = await processApiService.storeBpmnTemporarily({
+                      xml: originalXml,
+                      filename: newFilename,
+                      session_id: sessionId,
+                      overwrite: true,
+                    });
+                    if (res.data?.success) {
+                      try { sessionStorage.removeItem(item.key); } catch {}
+                      console.info('[Sync] Stored renamed diagram', newFilename);
+                      logConflictAction({ filename: newFilename, action: 'rename', diff: diffMeta });
+                    } else {
+                      remaining.push(item);
+                    }
+                  } catch {
+                    remaining.push(item);
+                  }
+                }
+                resolve();
+              }
+            });
+          });
+          continue; // move to next item after user resolves
+        }
         const res = await processApiService.storeBpmnTemporarily({
-          xml: item.xml,
+          xml: originalXml,
           filename: item.filename,
           session_id: (sessionStorage.getItem('sessionId') || 'session_sync'),
           overwrite: true,
@@ -1690,6 +2124,43 @@ const BpmnModelerComponent: React.FC<BpmnModelerProps> = ({
                 ×
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Conflict Modal (Enhanced) */}
+  {conflictModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-40 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg shadow-xl max-w-3xl w-full mx-4 p-6">
+            <h3 className="text-lg font-semibold text-gray-900 mb-2">Conflict Detected</h3>
+            <p className="text-sm text-gray-600 mb-4">A remote temporary version of <span className="font-medium">{conflictModal.local.filename}</span> exists.</p>
+            {diffPreview && (
+               <div className="mb-4 p-3 bg-gray-50 rounded border text-xs text-gray-700 space-y-1">
+                 <div><span className="font-medium">Structural Diff:</span> {diffPreview.summary} • Local-only: {diffPreview.localOnly} • Remote-only: {diffPreview.remoteOnly}</div>
+                 { (diffPreview as any).assigneeFilledCount ? <div>Assignees adopted: {(diffPreview as any).assigneeFilledCount}</div> : null }
+                 { (diffPreview as any).extensionsImportedCount ? <div>Extensions imported: {(diffPreview as any).extensionsImportedCount}</div> : null }
+               </div>
+             )}
+            <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-4">
+              <button onClick={() => conflictModal.onResolve('skip')} className="px-3 py-2 rounded bg-gray-100 hover:bg-gray-200 text-gray-700 text-xs font-medium">Skip</button>
+              <button onClick={() => conflictModal.onResolve('overwrite')} className="px-3 py-2 rounded bg-red-600 hover:bg-red-700 text-white text-xs font-medium">Overwrite</button>
+              <button onClick={() => conflictModal.onResolve('merge')} className="px-3 py-2 rounded bg-blue-600 hover:bg-blue-700 text-white text-xs font-medium">Merge</button>
+              <button onClick={() => { const nf = prompt('New filename:', `copy_${Date.now()}_${conflictModal.local.filename}`); if (nf) (conflictModal.onResolve as any)('rename', { newFilename: nf }); }} className="px-3 py-2 rounded bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-medium">Rename</button>
+              <button onClick={() => conflictModal.onResolve('skip')} className="px-3 py-2 rounded bg-gray-50 hover:bg-gray-100 text-gray-500 text-xs font-medium">Close</button>
+            </div>
+            <details className="mb-3">
+              <summary className="cursor-pointer text-xs text-gray-700">Show Remote / Local Preview (truncated)</summary>
+              <div className="mt-2 grid grid-cols-1 md:grid-cols-2 gap-2 max-h-72 overflow-auto text-[10px] font-mono">
+                <div className="border rounded p-2 bg-white">
+                  <div className="font-semibold mb-1">Remote</div>
+                  <pre className="whitespace-pre-wrap">{(conflictModal.remote?.xml || '').slice(0, 2000)}</pre>
+                </div>
+                <div className="border rounded p-2 bg-white">
+                  <div className="font-semibold mb-1">Local</div>
+                  <pre className="whitespace-pre-wrap">{(conflictModal.local?.xml || '').slice(0, 2000)}</pre>
+                </div>
+              </div>
+            </details>
           </div>
         </div>
       )}

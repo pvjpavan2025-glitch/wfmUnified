@@ -11,7 +11,7 @@ interface TempStorage {
   };
 }
 
-// In-memory storage (replace with Redis in production)
+// In-memory storage (replace with R  edis in production)
 const tempStorage: TempStorage = {};
 
 // Cleanup function to remove old entries

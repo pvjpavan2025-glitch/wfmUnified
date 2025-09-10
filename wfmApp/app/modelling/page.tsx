@@ -495,8 +495,11 @@ export default function ModellingPage() {
                   <p className="mt-2 text-gray-500">Loading processes...</p>
                 </div>
               ) : error ? (
-                <div className="text-center py-8">
+                <div className="text-center py-8 space-y-2">
                   <p className="text-red-500">{error}</p>
+                  {(process.env.NEXT_PUBLIC_BPMN_OFFLINE_MODE === 'true' || /offline|connrefused|failed to fetch/i.test(error)) && (
+                    <p className="text-xs text-gray-500">Backend unreachable (offline mode). Showing empty list.</p>
+                  )}
                 </div>
               ) : processes.length === 0 ? (
                 <div className="text-center py-8">
@@ -568,8 +571,11 @@ export default function ModellingPage() {
                   <p className="mt-2 text-gray-500">Loading instances...</p>
                 </div>
               ) : error ? (
-                <div className="text-center py-8">
+                <div className="text-center py-8 space-y-2">
                   <p className="text-red-500">{error}</p>
+                  {(process.env.NEXT_PUBLIC_BPMN_OFFLINE_MODE === 'true' || /offline|connrefused|failed to fetch/i.test(error)) && (
+                    <p className="text-xs text-gray-500">Backend unreachable (offline mode). Showing empty list.</p>
+                  )}
                 </div>
               ) : instances.length === 0 ? (
                 <div className="text-center py-8">
@@ -631,8 +637,11 @@ export default function ModellingPage() {
                   <p className="mt-2 text-gray-500">Loading templates...</p>
                 </div>
               ) : error ? (
-                <div className="text-center py-8">
+                <div className="text-center py-8 space-y-2">
                   <p className="text-red-500">{error}</p>
+                  {(process.env.NEXT_PUBLIC_BPMN_OFFLINE_MODE === 'true' || /offline|connrefused|failed to fetch/i.test(error)) && (
+                    <p className="text-xs text-gray-500">Backend unreachable (offline mode). Showing empty list.</p>
+                  )}
                 </div>
               ) : templates.length === 0 ? (
                 <div className="text-center py-8">

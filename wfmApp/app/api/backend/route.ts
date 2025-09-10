@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { withCors, preflight } from '@/lib/cors';
 
 const API_BASE = process.env.NEXT_PUBLIC_BPMN_BACKEND_URL || 'http://localhost:8100';
 
@@ -30,17 +31,13 @@ async function proxyRequest(path: string, req: NextRequest) {
 
   const respText = await response.text();
 
-  const headers: Record<string, string> = {
-    'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Methods': 'GET,POST,PUT,PATCH,DELETE,OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type,Authorization',
-  };
+  const headers: Record<string, string> = {};
 
   // Try to mirror content-type when possible
   const contentType = response.headers.get('content-type');
   if (contentType) headers['Content-Type'] = contentType;
 
-  return new NextResponse(respText, { status: response.status, headers });
+  return withCors(new NextResponse(respText, { status: response.status, headers }), req);
 }
 
 export async function GET(request: NextRequest) {
@@ -50,9 +47,9 @@ export async function GET(request: NextRequest) {
     if (!path) {
       return NextResponse.json({ error: 'Missing path parameter' }, { status: 400 });
     }
-    return await proxyRequest(path, request);
+  return await proxyRequest(path, request);
   } catch (err) {
-    return NextResponse.json({ error: 'Proxy GET failed', details: err instanceof Error ? err.message : String(err) }, { status: 500 });
+  return withCors(NextResponse.json({ error: 'Proxy GET failed', details: err instanceof Error ? err.message : String(err) }, { status: 500 }), request);
   }
 }
 
@@ -63,9 +60,9 @@ export async function POST(request: NextRequest) {
     if (!path) {
       return NextResponse.json({ error: 'Missing path parameter' }, { status: 400 });
     }
-    return await proxyRequest(path, request);
+  return await proxyRequest(path, request);
   } catch (err) {
-    return NextResponse.json({ error: 'Proxy POST failed', details: err instanceof Error ? err.message : String(err) }, { status: 500 });
+  return withCors(NextResponse.json({ error: 'Proxy POST failed', details: err instanceof Error ? err.message : String(err) }, { status: 500 }), request);
   }
 }
 
@@ -77,13 +74,6 @@ export async function DELETE(request: NextRequest) {
   return POST(request);
 }
 
-export async function OPTIONS() {
-  return new NextResponse(null, {
-    status: 200,
-    headers: {
-      'Access-Control-Allow-Origin': '*',
-      'Access-Control-Allow-Methods': 'GET,POST,PUT,PATCH,DELETE,OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type,Authorization',
-    },
-  });
+export async function OPTIONS(request: NextRequest) {
+  return preflight(request);
 }

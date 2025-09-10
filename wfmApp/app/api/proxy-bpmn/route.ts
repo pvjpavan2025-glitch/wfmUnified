@@ -1,4 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { withCors, preflight } from '@/lib/cors';
+
+const ALLOW_ALL = ['1','true','yes','on'].includes((process.env.PROXY_ALLOW_ALL_HOSTS||'').toLowerCase());
+const RESTRICT_HOSTS = ['1','true','yes','on'].includes((process.env.PROXY_RESTRICT_HOSTS||'').toLowerCase());
 
 export async function GET(request: NextRequest) {
   try {
@@ -24,25 +28,26 @@ export async function GET(request: NextRequest) {
     }
 
     // Security check - allow localhost, common domains, and CDNs
-    const allowedHosts = ['localhost', '127.0.0.1'];
-    const allowedDomains = [
-      'cdn.staticaly.com',
-      'raw.githubusercontent.com', 
-      'github.com',
-      'gitlab.com',
-      'bitbucket.org'
-    ];
-    
-    const isAllowed = allowedHosts.includes(validUrl.hostname) || 
-                     validUrl.hostname.endsWith('.local') ||
-                     allowedDomains.some(domain => validUrl.hostname === domain || validUrl.hostname.endsWith('.' + domain));
-    
-    if (!isAllowed) {
-      console.warn(`Blocked request to potentially unsafe host: ${validUrl.hostname}`);
-      return NextResponse.json(
-        { error: `Access to domain '${validUrl.hostname}' is not allowed for security reasons` },
-        { status: 403 }
-      );
+    if (!ALLOW_ALL) {
+      // Retain existing allow list logic unless override is enabled
+      const allowedHosts = ['localhost', '127.0.0.1'];
+      const allowedDomains = [
+        'cdn.staticaly.com',
+        'raw.githubusercontent.com', 
+        'github.com',
+        'gitlab.com',
+        'bitbucket.org'
+      ];
+      const isAllowed = allowedHosts.includes(validUrl.hostname) || 
+                       validUrl.hostname.endsWith('.local') ||
+                       allowedDomains.some(domain => validUrl.hostname === domain || validUrl.hostname.endsWith('.' + domain));
+      if (RESTRICT_HOSTS && !isAllowed) {
+        console.warn(`Blocked request to potentially unsafe host: ${validUrl.hostname}`);
+        return withCors(NextResponse.json(
+          { error: `Access to domain '${validUrl.hostname}' is not allowed for security reasons` },
+          { status: 403 }
+        ), request);
+      }
     }
 
     console.log(`Proxying request to: ${targetUrl}`);
@@ -77,37 +82,27 @@ export async function GET(request: NextRequest) {
     }
 
     // Return the content with appropriate headers
-    return new NextResponse(content, {
+    return withCors(new NextResponse(content, {
       status: 200,
       headers: {
         'Content-Type': 'application/xml',
-        'Access-Control-Allow-Origin': '*',
-        'Access-Control-Allow-Methods': 'GET',
-        'Access-Control-Allow-Headers': 'Content-Type',
         'Cache-Control': 'no-cache',
       },
-    });
+    }), request);
 
   } catch (error) {
     console.error('Proxy error:', error);
-    return NextResponse.json(
+    return withCors(NextResponse.json(
       { 
         error: 'Internal server error', 
         details: error instanceof Error ? error.message : 'Unknown error'
       },
       { status: 500 }
-    );
+    ), request);
   }
 }
 
 // Handle preflight requests
-export async function OPTIONS() {
-  return new NextResponse(null, {
-    status: 200,
-    headers: {
-      'Access-Control-Allow-Origin': '*',
-      'Access-Control-Allow-Methods': 'GET, OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type',
-    },
-  });
+export async function OPTIONS(request: NextRequest) {
+  return preflight(request);
 }

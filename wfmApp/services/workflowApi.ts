@@ -4,6 +4,7 @@
 
 const WORKFLOW_INSTANCE_SERVICE_URL = process.env.NEXT_PUBLIC_BPMN_BACKEND_URL || 'http://localhost:8100';
 const WORKFLOW_EXECUTION_SERVICE_URL = process.env.NEXT_PUBLIC_BPMN_BACKEND_URL || 'http://localhost:8100';
+const OFFLINE_MODE = process.env.NEXT_PUBLIC_BPMN_OFFLINE_MODE === 'true';
 
 export interface WorkflowInstanceCreate {
   name: string;
@@ -85,6 +86,24 @@ class WorkflowApiService {
       return await response.json();
     } catch (error) {
       console.error('Error creating workflow instance:', error);
+      if (OFFLINE_MODE) {
+        // Return a synthetic instance for local UI testing
+        return {
+          id: `offline_${Date.now()}`,
+          name: data.name,
+          description: data.description,
+            workflow_definition_id: data.workflow_definition_id,
+          status: 'completed',
+          current_step: undefined,
+          input_data: data.input_data,
+          execution_data: {},
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+          created_by: data.created_by,
+          steps: [],
+          execution_logs: []
+        } as any;
+      }
       throw new Error(`Failed to create workflow instance: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
   }
@@ -139,6 +158,9 @@ class WorkflowApiService {
       return await response.json();
     } catch (error) {
       console.error('Error executing workflow:', error);
+      if (OFFLINE_MODE) {
+        return { status: 'simulated', message: 'Offline mode execution simulated' };
+      }
       throw new Error(`Failed to execute workflow: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
   }
@@ -237,6 +259,9 @@ class WorkflowApiService {
       return await response.json();
     } catch (error) {
       console.error('Error fetching workflow instances:', error);
+      if (OFFLINE_MODE) {
+        return [];
+      }
       throw new Error(`Failed to fetch workflow instances: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
   }

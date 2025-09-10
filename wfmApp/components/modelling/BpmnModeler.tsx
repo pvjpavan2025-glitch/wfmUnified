@@ -30,6 +30,14 @@ interface BpmnModelerProps {
   isDirty: boolean;
 }
 
+// Import behavior env flags (build-time via Next.js)
+// If true, skip the direct browser fetch and go straight to proxy (useful when CORS or local ports are blocked)
+const IMPORT_PROXY_ONLY = process.env.NEXT_PUBLIC_IMPORT_PROXY_ONLY === 'true';
+// If true, try proxy first then fallback to direct (inverse of default order)
+const IMPORT_PROXY_FIRST = process.env.NEXT_PUBLIC_IMPORT_PROXY_FIRST === 'true';
+// Optional custom proxy route (defaults to /api/proxy-bpmn)
+const IMPORT_PROXY_ROUTE = process.env.NEXT_PUBLIC_IMPORT_PROXY_ROUTE || '/api/proxy-bpmn';
+
 const BpmnModelerComponent: React.FC<BpmnModelerProps> = ({ 
   onSave, 
   onClose, 
@@ -57,6 +65,36 @@ const BpmnModelerComponent: React.FC<BpmnModelerProps> = ({
   const [toast, setToast] = useState<{message: string, type: 'success' | 'error' | 'info'} | null>(null);
   const [isManualImport, setIsManualImport] = useState(false);
   const manualImportRef = useRef(false);
+  // Offline + sync state (added)
+  const [backendOnline, setBackendOnline] = useState<boolean>(true);
+  const [pendingSyncs, setPendingSyncs] = useState<{ key: string; filename: string; xml: string; created: number }[]>([]);
+  const [lastSyncAttempt, setLastSyncAttempt] = useState<number | null>(null);
+  const retryIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  // Forward declarations for sync logic (defined after function bodies for clarity)
+  const attemptSyncRef = useRef<() => Promise<void>>(async () => {});
+  const handleManualSync = useCallback(async () => {
+    if (attemptSyncRef.current) {
+      await attemptSyncRef.current();
+      if (pendingSyncs.length === 0 && backendOnline) {
+        setToast({ message: 'All pending diagrams synced', type: 'success' });
+      } else if (!backendOnline) {
+        setToast({ message: 'Backend still offline', type: 'info' });
+      } else {
+        setToast({ message: 'Some diagrams still pending', type: 'info' });
+      }
+    }
+  }, [pendingSyncs, backendOnline]);
+
+  // Temporary BPMN storage control flags
+  const TEMP_STORE_DISABLED = process.env.NEXT_PUBLIC_DISABLE_TEMP_STORE === 'true';
+  const tempStoreFailureRef = useRef<number>(0); // count consecutive failures
+  const TEMP_STORE_FAILURE_SILENCE_AFTER = 1; // after first shown failure, silence subsequent ones
+  const initialOffline = process.env.NEXT_PUBLIC_BPMN_OFFLINE_MODE === 'true';
+  const [offlineModeActive, setOfflineModeActive] = useState<boolean>(initialOffline);
+  const [queueCollapsed, setQueueCollapsed] = useState<boolean>(() => {
+    if (typeof window === 'undefined') return false;
+    try { return localStorage.getItem('bpmn_queue_collapsed') === '1'; } catch { return false; }
+  });
 
   // Ensure camunda namespace is present so Camunda properties provider activates element groups
   const ensureCamundaNamespace = useCallback((rawXml: string | undefined | null): string => {
@@ -613,34 +651,117 @@ const BpmnModelerComponent: React.FC<BpmnModelerProps> = ({
 
   // Store BPMN in Redis temporarily
   const storeBpmnInRedis = async (xml: string, filename: string) => {
-    try {
-      const sessionId = sessionStorage.getItem('sessionId') || `session_${Date.now()}`;
-      if (!sessionStorage.getItem('sessionId')) {
-        sessionStorage.setItem('sessionId', sessionId);
-      }
+    // Always ensure a session id (even if remote storage disabled)
+    const sessionId = sessionStorage.getItem('sessionId') || `session_${Date.now()}`;
+    if (!sessionStorage.getItem('sessionId')) {
+      sessionStorage.setItem('sessionId', sessionId);
+    }
 
+    // If offline mode active or backend currently offline, queue
+    if (offlineModeActive || !backendOnline) {
+      const key = `bpmn_temp_${filename}_${Date.now()}`;
+      try { sessionStorage.setItem(key, xml); } catch {}
+      setPendingSyncs(prev => [...prev, { key, filename, xml, created: Date.now() }]);
+      console.info('[TempStore][OfflineQueue] Queued diagram for later sync:', key);
+      return { key, offline: true, queued: true };
+    }
+
+    // If disabled via env flag, silently fallback to sessionStorage
+    if (TEMP_STORE_DISABLED) {
+      const key = `bpmn_temp_${filename}_${Date.now()}`;
+      sessionStorage.setItem(key, xml);
+      console.info('[TempStore] Disabled via NEXT_PUBLIC_DISABLE_TEMP_STORE, used sessionStorage key:', key);
+      return { key, disabled: true };
+    }
+
+    try {
       const response = await processApiService.storeBpmnTemporarily({
         xml,
         filename,
+        // Provide both snake & camel case to support either backend expectation
         session_id: sessionId,
+        // @ts-ignore add camelCase for possible backend variant
+        sessionId,
         overwrite: true,
       });
 
       if (response.data?.success) {
+        tempStoreFailureRef.current = 0; // reset failures
         showToast(`BPMN stored temporarily: ${response.data.message}`, 'success');
         return response.data;
-      } else {
-        throw new Error(response.error || 'Failed to store BPMN temporarily');
       }
+      throw new Error(response.error || 'Failed to store BPMN temporarily');
     } catch (error: any) {
-      console.warn('Temporary storage failed:', error);
-      showToast(`Storage unavailable: ${error.message}`, 'error');
-      // Fallback to sessionStorage
+      tempStoreFailureRef.current += 1;
+      const isConnRefused = /fetch|connrefused|connection refused|econnrefused/i.test(error?.message || '');
       const key = `bpmn_temp_${filename}_${Date.now()}`;
       sessionStorage.setItem(key, xml);
-      return { key };
+      setPendingSyncs(prev => [...prev, { key, filename, xml, created: Date.now() }]);
+      setBackendOnline(false);
+      setOfflineModeActive(true);
+      const baseMsg = isConnRefused ? 'Backend offline, queued locally' : 'Temp storage failed, queued locally';
+      if (tempStoreFailureRef.current <= TEMP_STORE_FAILURE_SILENCE_AFTER) {
+        showToast(`${baseMsg}. (key ${key})`, 'error');
+      }
+      console.warn('Temporary storage failure (queued):', { error, key });
+      return { key, fallback: true, queued: true };
     }
   };
+
+  // Attempt background sync of queued diagrams
+  const attemptSync = useCallback(async () => {
+    if (pendingSyncs.length === 0) return;
+    const reachable = await processApiService.pingBackend(2500);
+    if (!reachable) {
+      setBackendOnline(false);
+      return;
+    }
+    setBackendOnline(true);
+    const remaining: typeof pendingSyncs = [];
+    for (const item of pendingSyncs) {
+      try {
+        const res = await processApiService.storeBpmnTemporarily({
+          xml: item.xml,
+          filename: item.filename,
+          session_id: (sessionStorage.getItem('sessionId') || 'session_sync'),
+          overwrite: true,
+        });
+        if (res.data?.success) {
+          try { sessionStorage.removeItem(item.key); } catch {}
+          console.info('[Sync] Uploaded queued diagram', item.filename);
+        } else {
+          remaining.push(item);
+        }
+      } catch (e) {
+        remaining.push(item);
+      }
+    }
+    setPendingSyncs(remaining);
+  }, [pendingSyncs]);
+
+  attemptSyncRef.current = attemptSync;
+
+  // Poll while offline
+  useEffect(() => {
+    if (backendOnline || pendingSyncs.length === 0) {
+      if (retryIntervalRef.current) {
+        clearInterval(retryIntervalRef.current);
+        retryIntervalRef.current = null;
+      }
+      return;
+    }
+    if (!retryIntervalRef.current) {
+      retryIntervalRef.current = setInterval(() => {
+        attemptSync();
+      }, 10000);
+    }
+    return () => {
+      if (retryIntervalRef.current) {
+        clearInterval(retryIntervalRef.current);
+        retryIntervalRef.current = null;
+      }
+    };
+  }, [backendOnline, pendingSyncs, attemptSync]);
 
   const handleToggleTransactionBoundaries = () => {
     // Toggle transaction boundaries visualization
@@ -1013,49 +1134,84 @@ const BpmnModelerComponent: React.FC<BpmnModelerProps> = ({
     setError('');
 
     try {
-      
-      let xmlContent = '';
-      
-      // Try direct fetch first (for same-origin or CORS-enabled URLs)
-      try {
-        const response = await fetch(importUrl, {
+  let xmlContent = '';
+  const isLocalRelative = importUrl.startsWith('/') && !importUrl.startsWith('//');
+
+      const doDirectFetch = async (): Promise<string> => {
+        const resp = await fetch(importUrl, {
           method: 'GET',
-          headers: {
-            'Accept': 'application/xml, text/xml, text/plain, */*',
-          },
-          mode: 'cors',
+          headers: { 'Accept': 'application/xml, text/xml, text/plain, */*' },
+          // mode 'cors' is fine; same-origin will ignore; remote may need proxy fallback
+          mode: 'cors'
         });
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}: ${resp.statusText}`);
+        return await resp.text();
+      };
 
-        if (!response.ok) {
-          throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      const doProxyFetch = async (): Promise<string> => {
+        const proxyUrl = `${IMPORT_PROXY_ROUTE}?url=${encodeURIComponent(importUrl)}`;
+        const proxyResp = await fetch(proxyUrl, {
+          method: 'GET',
+          headers: { 'Accept': 'application/xml, text/xml, text/plain, */*' }
+        });
+        if (!proxyResp.ok) {
+          // Try to parse JSON error from proxy
+            let details: any = undefined;
+            try { details = await proxyResp.json(); } catch (_) { /* ignore */ }
+            const proxyMsg = details?.error || proxyResp.statusText || 'Proxy fetch failed';
+            throw new Error(`Proxy error: ${proxyMsg}`);
         }
+        return await proxyResp.text();
+      };
 
-        xmlContent = await response.text();
-        
-      } catch (directFetchError) {
-        
-        // Use our proxy API for CORS-blocked URLs
+      const classifyConnRefused = (err: unknown) => {
+        const msg = err instanceof Error ? (err.message || '') : String(err);
+        return /ECONNREFUSED|ENOTFOUND|ERR_CONNECTION_REFUSED|Failed to fetch/.test(msg);
+      };
+
+      // Execution order logic
+  const attemptDirectFirst = !IMPORT_PROXY_ONLY && !IMPORT_PROXY_FIRST; // default behavior
+  const attemptProxyFirst = IMPORT_PROXY_FIRST || IMPORT_PROXY_ONLY;
+
+      let directErr: any = null;
+      let proxyErr: any = null;
+
+      const tryDirect = async () => {
+        try { return await doDirectFetch(); } catch (e) { directErr = e; return undefined; }
+      };
+      const tryProxy = async () => {
+        try { return await doProxyFetch(); } catch (e) { proxyErr = e; return undefined; }
+      };
+
+      if (isLocalRelative) {
+        // Directly fetch from same origin static public folder, skip proxy entirely
         try {
-          const proxyUrl = `/api/proxy-bpmn?url=${encodeURIComponent(importUrl)}`;
-          
-          const proxyResponse = await fetch(proxyUrl, {
-            method: 'GET',
-            headers: {
-              'Accept': 'application/xml, text/xml, text/plain, */*',
-            },
-          });
-
-          if (!proxyResponse.ok) {
-            const errorData = await proxyResponse.json().catch(() => ({ error: 'Unknown proxy error' }));
-            throw new Error(`Proxy error: ${errorData.error || proxyResponse.statusText}`);
-          }
-
-          xmlContent = await proxyResponse.text();
-          
-        } catch (proxyError) {
-          console.error('Proxy fetch also failed:', proxyError);
-          throw new Error(`Unable to fetch BPMN file. ${proxyError instanceof Error ? proxyError.message : 'Please check the URL and ensure the server allows cross-origin requests.'}`);
+          xmlContent = await doDirectFetch();
+        } catch (e) {
+          throw new Error(`Local file fetch failed: ${(e as Error).message}`);
         }
+      } else if (attemptProxyFirst) {
+        const proxyResult = await tryProxy();
+        const directResult = !IMPORT_PROXY_ONLY && !proxyResult ? await tryDirect() : undefined;
+        xmlContent = proxyResult || directResult || '';
+      } else if (attemptDirectFirst) {
+        const directResult = await tryDirect();
+        const proxyResult = !directResult ? await tryProxy() : undefined;
+        xmlContent = directResult || proxyResult || '';
+      }
+
+      if (!xmlContent) {
+        // Build richer diagnostic
+        const messages: string[] = [];
+        if (directErr) messages.push(`Direct fetch failed: ${directErr instanceof Error ? directErr.message : directErr}`);
+        if (proxyErr) messages.push(`Proxy fetch failed: ${proxyErr instanceof Error ? proxyErr.message : proxyErr}`);
+
+        // Special hint for connection refused to localhost port
+        if (classifyConnRefused(directErr) || classifyConnRefused(proxyErr)) {
+          messages.push('Hint: Connection refused suggests no server is listening at the specified host/port (e.g., localhost:3080). Start a static server or use a reachable URL.');
+        }
+
+        throw new Error(messages.join(' | '));
       }
       
       if (!xmlContent || xmlContent.trim().length === 0) {
@@ -1085,7 +1241,14 @@ const BpmnModelerComponent: React.FC<BpmnModelerProps> = ({
       window.__recent_manual_import = true;  // Additional protection
       
       // Import the XML directly (bypass safe import for override behavior)
-      await (modelerRef.current as any).importXML(normalizedXml);
+      let importSucceeded = false;
+      try {
+        await (modelerRef.current as any).importXML(normalizedXml);
+        importSucceeded = true;
+      } catch (impErr) {
+        console.error('❌ importXML failed:', impErr);
+        throw new Error(`BPMN parse/import failed: ${(impErr as Error).message || impErr}`);
+      }
       
       // Force canvas refresh and ensure elements are visible
       const canvas = modelerRef.current.get('canvas');
@@ -1206,13 +1369,50 @@ const BpmnModelerComponent: React.FC<BpmnModelerProps> = ({
         eventBus.fire('selection.changed', { newSelection: [] });
       }, 100);
       
-      // Update the XML state
-      const { xml: importedXml } = await (modelerRef.current as any).saveXML({ format: true });
-      setXml(importedXml || '');
-      
-      // Store in Redis and show success
-      await storeBpmnInRedis(normalizedXml, `imported_${Date.now()}.bpmn`);
-      showToast('BPMN diagram imported successfully!', 'success');
+      if (importSucceeded) {
+        // Update the XML state only if import actually succeeded
+        const { xml: importedXml } = await (modelerRef.current as any).saveXML({ format: true });
+        setXml(importedXml || '');
+
+        // Decide whether to attempt remote temp storage (skip for local static assets or if disabled)
+        const isLocalStaticRef = importUrl.startsWith('/') && !importUrl.startsWith('//');
+        let storageOutcome: any = null;
+        if (!isLocalStaticRef) {
+          storageOutcome = await storeBpmnInRedis(normalizedXml, `imported_${Date.now()}.bpmn`);
+        } else {
+          console.info('[Import] Skipping remote temp storage for local static path:', importUrl);
+        }
+
+        if (storageOutcome?.fallback) {
+          showToast('Imported (remote temp store offline, local session used).', 'info');
+        } else if (storageOutcome?.disabled) {
+          showToast('Imported (temp store disabled).', 'info');
+        } else if (isLocalRelative) {
+          showToast('BPMN diagram imported from local public path.', 'success');
+        } else if (storageOutcome === null) {
+          showToast('BPMN diagram imported (no storage attempted).', 'success');
+        } else {
+          showToast('BPMN diagram imported successfully!', 'success');
+        }
+
+        // Auto zoom fit again (ensures view) and auto select first meaningful element
+        try {
+          const canvas = modelerRef.current!.get('canvas');
+          canvas.zoom('fit-viewport');
+        } catch (e) { /* ignore */ }
+        try {
+          const elementRegistry = modelerRef.current!.get('elementRegistry');
+          const selectionSvc = modelerRef.current!.get('selection');
+          const all = elementRegistry.getAll();
+            const firstTask = all.find((el: any) => /Task$/.test(el.businessObject?.$type || '')) ||
+                              all.find((el: any) => el.type === 'bpmn:StartEvent' || el.type === 'bpmn:StartEvent');
+          if (firstTask) {
+            selectionSvc.select(firstTask);
+          }
+        } catch (e) {
+          console.debug('Auto-select failed', e);
+        }
+      }
       setShowImportDialog(false);
       setImportUrl('');
       onDirtyChange(false);
@@ -1220,22 +1420,27 @@ const BpmnModelerComponent: React.FC<BpmnModelerProps> = ({
     } catch (error) {
       console.error('Error importing BPMN from URL:', error);
       const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
-      
-      // Check if this is a file validity error or a system error
-      if (errorMessage.includes('no diagram to display') || 
-          errorMessage.includes('unparsable content') || 
-          errorMessage.includes('unknown type') ||
-          errorMessage.includes('Invalid BPMN') ||
-          errorMessage.includes('empty content') ||
-          errorMessage.includes('not return valid XML')) {
-        // File validity errors - keep dialog open for retry
+      const lower = errorMessage.toLowerCase();
+
+      // Connection refused specific guidance
+      const isConnRefused = /connrefused|connection refused|econnrefused|failed to fetch/.test(lower);
+      if (isConnRefused) {
+        const hint = 'Connection refused. Ensure a server is running at the URL (e.g. run: npx http-server -p 3080 .) or move the file into public/ and use a relative path (e.g. /bpmn/telecom-o2a-camunda.bpmn).';
+        showToast(hint, 'error');
+        setError(hint);
+      } else if (
+        lower.includes('no diagram to display') ||
+        lower.includes('unparsable content') ||
+        lower.includes('unknown type') ||
+        lower.includes('invalid bpmn') ||
+        lower.includes('empty content') ||
+        lower.includes('not return valid xml')
+      ) {
         showToast(`Invalid file: ${errorMessage}`, 'error');
         setError(`Please check your file and try again. ${errorMessage}`);
       } else {
-        // System errors - these are more serious
         showToast(`Import failed: ${errorMessage}`, 'error');
         setError(`Import failed: ${errorMessage}`);
-        // For system errors, close the dialog
         setShowImportDialog(false);
         setImportUrl('');
       }
@@ -1299,7 +1504,22 @@ const BpmnModelerComponent: React.FC<BpmnModelerProps> = ({
       {/* Header */}
       <div className="bg-white border-b px-6 py-4 flex justify-between items-center">
         <h2 className="text-xl font-semibold text-gray-900">FSM Process Designer</h2>
-        <div className="flex space-x-3">
+        <div className="flex items-center space-x-4">
+          {(!backendOnline || pendingSyncs.length > 0) && (
+            <div className="flex items-center space-x-2">
+              {!backendOnline && (
+                <span className="inline-flex items-center px-2 py-1 rounded-md text-xs font-medium bg-red-100 text-red-700 border border-red-300" title="Backend unreachable; storing diagrams locally until it returns">Offline Storage</span>
+              )}
+              {pendingSyncs.length > 0 && (
+                <button
+                  onClick={handleManualSync}
+                  className="inline-flex items-center px-2 py-1 rounded-md text-xs font-medium bg-yellow-100 text-yellow-800 border border-yellow-300 hover:bg-yellow-200"
+                  title="Manually try syncing queued diagrams"
+                >Sync {pendingSyncs.length}</button>
+              )}
+            </div>
+          )}
+          <div className="flex space-x-3">
           <button
             onClick={handleNewDiagram}
             className="bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded text-sm font-medium"
@@ -1363,6 +1583,7 @@ const BpmnModelerComponent: React.FC<BpmnModelerProps> = ({
           >
             Close
           </button>
+          </div>
         </div>
       </div>
 
@@ -1398,6 +1619,33 @@ const BpmnModelerComponent: React.FC<BpmnModelerProps> = ({
         </div>
       )}
 
+      {/* Collapsible queued diagrams panel (enhanced) */}
+      {pendingSyncs.length > 0 && !queueCollapsed && (
+        <div className="fixed bottom-4 left-4 bg-white border border-gray-200 shadow-lg rounded-md p-3 w-72 z-40">
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-xs font-semibold text-gray-700">Queued Diagrams ({pendingSyncs.length})</span>
+            <div className="flex items-center space-x-2">
+              <button onClick={handleManualSync} className="text-xs text-blue-600 hover:underline">Sync Now</button>
+              <button onClick={() => setQueueCollapsed(true)} className="text-xs text-gray-500 hover:underline" title="Collapse">×</button>
+            </div>
+          </div>
+          <ul className="max-h-32 overflow-auto space-y-1">
+            {pendingSyncs.slice(-10).map(item => (
+              <li key={item.key} className="text-[10px] text-gray-600 truncate" title={item.filename}>{new Date(item.created).toLocaleTimeString()} • {item.filename}</li>
+            ))}
+          </ul>
+          <div className="mt-2 text-[10px] text-gray-400">
+            {backendOnline ? 'Backend online' : 'Waiting for backend...'}
+          </div>
+        </div>
+      )}
+      {pendingSyncs.length > 0 && queueCollapsed && (
+        <button
+          onClick={() => setQueueCollapsed(false)}
+          className="fixed bottom-4 left-4 bg-white border border-gray-300 shadow-md rounded-full px-3 py-2 text-xs font-medium text-gray-700 hover:bg-gray-50 z-40"
+          title="Expand queued diagrams panel"
+        >Queue ({pendingSyncs.length})</button>
+      )}
       {/* Toast Notifications */}
       {toast && (
         <div className={`fixed top-4 right-4 z-50 max-w-sm w-full ${

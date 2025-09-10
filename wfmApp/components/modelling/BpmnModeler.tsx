@@ -72,11 +72,14 @@ const BpmnModelerComponent: React.FC<BpmnModelerProps> = ({
     summary: string;
     localOnly?: number;
     remoteOnly?: number;
+<<<<<<< HEAD
     assigneeFilledCount?: number;
     candidateGroupsFilledCount?: number;
     candidateUsersFilledCount?: number;
     dueDateFilledCount?: number;
     extensionsImportedCount?: number;
+=======
+>>>>>>> 9f492dd7a98e4a8bb5157fa332edc8af17e007ea
   } | null>(null);
   const [isManualImport, setIsManualImport] = useState(false);
   const manualImportRef = useRef(false);
@@ -1078,6 +1081,7 @@ const BpmnModelerComponent: React.FC<BpmnModelerProps> = ({
           const removed = diffMeta.remoteOnly?.length || 0; // remote-only relative to previous local
           const changed = diffMeta.modified?.length || 0;
           const summary = `${added} added, ${removed} remote-only, ${changed} modified elements`;
+<<<<<<< HEAD
           setDiffPreview({
             added,
             removed,
@@ -1091,6 +1095,9 @@ const BpmnModelerComponent: React.FC<BpmnModelerProps> = ({
             dueDateFilledCount: diffMeta.dueDateFilled?.length || 0,
             extensionsImportedCount: diffMeta.extensionsImported?.length || 0
           });
+=======
+          setDiffPreview({ added, removed, changed, summary, localOnly: added, remoteOnly: removed });
+>>>>>>> 9f492dd7a98e4a8bb5157fa332edc8af17e007ea
           // Apply overlays (show before modal)
           if (modelerRef.current) {
             clearDiffOverlays(modelerRef.current);
@@ -2155,9 +2162,12 @@ const BpmnModelerComponent: React.FC<BpmnModelerProps> = ({
                <div className="mb-4 p-3 bg-gray-50 rounded border text-xs text-gray-700 space-y-1">
                  <div><span className="font-medium">Structural Diff:</span> {diffPreview.summary} • Local-only: {diffPreview.localOnly} • Remote-only: {diffPreview.remoteOnly}</div>
                  { (diffPreview as any).assigneeFilledCount ? <div>Assignees adopted: {(diffPreview as any).assigneeFilledCount}</div> : null }
+<<<<<<< HEAD
                  { (diffPreview as any).candidateGroupsFilledCount ? <div>Candidate Groups adopted: {(diffPreview as any).candidateGroupsFilledCount}</div> : null }
                  { (diffPreview as any).candidateUsersFilledCount ? <div>Candidate Users adopted: {(diffPreview as any).candidateUsersFilledCount}</div> : null }
                  { (diffPreview as any).dueDateFilledCount ? <div>Due Dates adopted: {(diffPreview as any).dueDateFilledCount}</div> : null }
+=======
+>>>>>>> 9f492dd7a98e4a8bb5157fa332edc8af17e007ea
                  { (diffPreview as any).extensionsImportedCount ? <div>Extensions imported: {(diffPreview as any).extensionsImportedCount}</div> : null }
                </div>
              )}

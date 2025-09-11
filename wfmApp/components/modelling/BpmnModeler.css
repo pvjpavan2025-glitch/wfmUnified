@@ -1,7 +1,7 @@
 /* Enhanced BPMN Properties Panel Styling */
 .properties-panel-container {
   background: #f8f9fa;
-  border-left: 1px solid #e1e5e9;
+  border-right: 1px solid #e1e5e9;
 }
 
 /* Override default properties panel styles for better appearance */
@@ -263,4 +263,27 @@
 
 .bpmn-canvas-container.debug-mode [data-element-id] {
   outline: 1px solid blue !important;
+}
+
+/* Single sidebar layout specific styles */
+.single-sidebar-layout {
+  display: flex;
+  height: 100%;
+}
+
+.single-sidebar-layout .properties-panel-container {
+  border-right: 1px solid #e1e5e9;
+  border-left: none;
+}
+
+/* Mobile responsive adjustments for single sidebar */
+@media (max-width: 768px) {
+  .single-sidebar-layout {
+    flex-direction: column;
+  }
+  
+  .single-sidebar-layout .w-80 {
+    width: 100%;
+    max-height: 40vh;
+  }
 }

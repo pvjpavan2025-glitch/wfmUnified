@@ -2202,51 +2202,8 @@ const BpmnModelerComponent: React.FC<BpmnModelerProps> = ({
 
       {/* Main Content */}
       <div className="flex-1 flex">
-        {/* BPMN Canvas */}
-        <div className="flex-1 relative">
-          {/* Empty state message when no diagram is loaded and not auto-creating */}
-          {!isLoading && !xml && !error && !initialXml && (
-            <div className="absolute inset-0 flex items-center justify-center bg-gray-50">
-              <div className="text-center">
-                <svg className="mx-auto h-16 w-16 text-gray-400 mb-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                </svg>
-                <h3 className="text-lg font-medium text-gray-900 mb-2">Ready to Model</h3>
-                <p className="text-gray-500 mb-4">Create a new BPMN diagram or import an existing one</p>
-                <div className="space-x-3">
-                  <button
-                    onClick={handleNewDiagram}
-                    className="bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded text-sm font-medium"
-                  >
-                    Create New Diagram
-                  </button>
-                  <button
-                    onClick={handleImport}
-                    className="bg-cyan-600 hover:bg-cyan-700 text-white px-4 py-2 rounded text-sm font-medium"
-                  >
-                    Import Diagram
-                  </button>
-                </div>
-              </div>
-            </div>
-          )}
-          <div
-            ref={containerRef}
-            className="bpmn-canvas-container w-full h-full border-r border-gray-200"
-            style={{ minHeight: '600px' }}
-          />
-          {/* Minimap Container */}
-          {showMinimap && (
-            <div
-              ref={minimapRef}
-              className="absolute bottom-4 right-4 w-48 h-32 bg-white border border-gray-300 shadow-lg rounded-md overflow-hidden"
-              style={{ zIndex: 10 }}
-            />
-          )}
-        </div>
-
-        {/* Properties Panel */}
-        <div className="w-80 bg-white border-l border-gray-200 flex flex-col">
+        {/* Left Sidebar with Properties Panel */}
+        <div className="w-80 bg-white border-r border-gray-200 flex flex-col">
           <div className="p-4 border-b border-gray-200">
             <h3 className="text-lg font-medium text-gray-900">Properties</h3>
             {selectedElement && (
@@ -2352,6 +2309,49 @@ const BpmnModelerComponent: React.FC<BpmnModelerProps> = ({
               </div>
             </div>
           </div>
+        </div>
+
+        {/* BPMN Canvas */}
+        <div className="flex-1 relative">
+          {/* Empty state message when no diagram is loaded and not auto-creating */}
+          {!isLoading && !xml && !error && !initialXml && (
+            <div className="absolute inset-0 flex items-center justify-center bg-gray-50">
+              <div className="text-center">
+                <svg className="mx-auto h-16 w-16 text-gray-400 mb-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                </svg>
+                <h3 className="text-lg font-medium text-gray-900 mb-2">Ready to Model</h3>
+                <p className="text-gray-500 mb-4">Create a new BPMN diagram or import an existing one</p>
+                <div className="space-x-3">
+                  <button
+                    onClick={handleNewDiagram}
+                    className="bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded text-sm font-medium"
+                  >
+                    Create New Diagram
+                  </button>
+                  <button
+                    onClick={handleImport}
+                    className="bg-cyan-600 hover:bg-cyan-700 text-white px-4 py-2 rounded text-sm font-medium"
+                  >
+                    Import Diagram
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+          <div
+            ref={containerRef}
+            className="bpmn-canvas-container w-full h-full"
+            style={{ minHeight: '600px' }}
+          />
+          {/* Minimap Container */}
+          {showMinimap && (
+            <div
+              ref={minimapRef}
+              className="absolute bottom-4 right-4 w-48 h-32 bg-white border border-gray-300 shadow-lg rounded-md overflow-hidden"
+              style={{ zIndex: 10 }}
+            />
+          )}
         </div>
       </div>
 

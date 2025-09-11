@@ -67,15 +67,19 @@ async def continue_workflow(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+class WorkflowCancelRequest(BaseModel):
+    """Request model for cancelling workflow execution."""
+    cancelled_by: str = "user"
+
 @router.post("/instances/{workflow_instance_id}/cancel")
 async def cancel_workflow(
     workflow_instance_id: str,
-    cancelled_by: str,
+    request: WorkflowCancelRequest,
     service: WorkflowExecutionService = Depends(get_workflow_execution_service)
 ):
     """Cancel workflow execution."""
     try:
-        success = await service.cancel_workflow(workflow_instance_id, cancelled_by)
+        success = await service.cancel_workflow(workflow_instance_id, request.cancelled_by)
         if not success:
             raise HTTPException(status_code=400, detail="Failed to cancel workflow")
         return {"message": "Workflow cancelled successfully"}

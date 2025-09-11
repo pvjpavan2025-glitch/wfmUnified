@@ -76,7 +76,15 @@ const HamburgerMenu = () => {
 export function AppShell({ title, subtitle, children }: { title: string; subtitle?: string; children: React.ReactNode }) {
   const pathname = usePathname()
   const router = useRouter()
-  const [isModellingExpanded, setIsModellingExpanded] = useState(false)
+  // Keep modelling menu expanded if user is on any modelling page
+  const [isModellingExpanded, setIsModellingExpanded] = useState(pathname?.startsWith('/modelling') || false)
+  
+  // Update expanded state when pathname changes to modelling routes
+  React.useEffect(() => {
+    if (pathname?.startsWith('/modelling')) {
+      setIsModellingExpanded(true)
+    }
+  }, [pathname])
 
   return (
     <SidebarProvider>

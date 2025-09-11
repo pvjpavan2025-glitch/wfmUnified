@@ -1,11 +1,13 @@
 "use client"
 
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import dynamic from 'next/dynamic';
 import { AppShell } from '@/components/app-shell';
 import { processApiService, ProcessCreate } from '@/services/processApi';
 import { useToast } from '@/hooks/use-toast';
 import { ProcessNameEditor } from '../../../components/modelling/ProcessNameEditor';
+import { TemplateModal } from '../../../components/modelling/TemplateModal';
+import { ImportModal } from '../../../components/modelling/ImportModal';
 
 // Dynamic imports for components
 const BpmnModelerComponent = dynamic(
@@ -21,9 +23,26 @@ export default function NewProcessPage() {
   const [showBpmnEditor, setShowBpmnEditor] = useState(false);
   const [processName, setProcessName] = useState('New Process');
   const [isDirty, setIsDirty] = useState(false);
+  const [showTemplateModal, setShowTemplateModal] = useState(false);
+  const [showImportModal, setShowImportModal] = useState(false);
+  const [importedXml, setImportedXml] = useState<string>('');
 
   const handleCreateNewProcess = () => {
     setProcessName('New Process');
+    setShowBpmnEditor(true);
+  };
+
+  const handleCreateFromTemplate = () => {
+    setShowTemplateModal(true);
+  };
+
+  const handleImport = () => {
+    setShowImportModal(true);
+  };
+
+  const handleImportComplete = (xml: string, filename?: string) => {
+    setProcessName(filename || 'Imported Process');
+    setImportedXml(xml);
     setShowBpmnEditor(true);
   };
 
@@ -94,8 +113,8 @@ export default function NewProcessPage() {
           <BpmnModelerComponent
             onSave={handleSaveProcess}
             onClose={() => setShowBpmnEditor(false)}
-            autoCreateDiagram={true}
-            initialXml=""
+            autoCreateDiagram={!importedXml}
+            initialXml={importedXml}
             onDirtyChange={setIsDirty}
             isDirty={isDirty}
           />
@@ -126,9 +145,34 @@ export default function NewProcessPage() {
             >
               Create from Scratch
             </button>
+            <button 
+              onClick={handleCreateFromTemplate}
+              className="bg-green-600 hover:bg-green-700 text-white font-medium py-2 px-4 rounded"
+            >
+              Create from Template
+            </button>
+            <button 
+              onClick={handleImport}
+              className="bg-purple-600 hover:bg-purple-700 text-white font-medium py-2 px-4 rounded"
+            >
+              Import
+            </button>
           </div>
         </div>
       </div>
+      
+      {/* Template Modal */}
+      <TemplateModal
+        isOpen={showTemplateModal}
+        onClose={() => setShowTemplateModal(false)}
+      />
+      
+      {/* Import Modal */}
+      <ImportModal
+        isOpen={showImportModal}
+        onClose={() => setShowImportModal(false)}
+        onImport={handleImportComplete}
+      />
     </AppShell>
   );
 }

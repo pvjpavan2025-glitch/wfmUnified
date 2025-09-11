@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { withCors, preflight } from '@/lib/cors';
 
 // Mock Redis interface - replace with actual Redis client
 interface TempStorage {
@@ -10,7 +11,7 @@ interface TempStorage {
   };
 }
 
-// In-memory storage (replace with Redis in production)
+// In-memory storage (replace with R  edis in production)
 const tempStorage: TempStorage = {};
 
 // Cleanup function to remove old entries
@@ -62,11 +63,11 @@ export async function POST(request: NextRequest) {
       sessionId
     };
     
-    return NextResponse.json({
+  return withCors(NextResponse.json({
       success: true,
       key,
       message: overwrite ? 'BPMN stored (overwrote existing)' : 'BPMN stored successfully'
-    });
+  }), request);
     
   } catch (error) {
     console.error('Error storing BPMN temporarily:', error);
@@ -103,10 +104,10 @@ export async function GET(request: NextRequest) {
         );
       }
       
-      return NextResponse.json({
+  return withCors(NextResponse.json({
         success: true,
         data: item
-      });
+  }), request);
     }
     
     if (sessionId) {
@@ -115,10 +116,10 @@ export async function GET(request: NextRequest) {
         .filter(([k, v]) => v.sessionId === sessionId)
         .map(([k, v]) => ({ key: k, ...v }));
       
-      return NextResponse.json({
+  return withCors(NextResponse.json({
         success: true,
         data: sessionItems
-      });
+  }), request);
     }
     
   } catch (error) {
@@ -140,7 +141,7 @@ export async function DELETE(request: NextRequest) {
       // Delete specific item
       if (tempStorage[key]) {
         delete tempStorage[key];
-        return NextResponse.json({ success: true, message: 'BPMN deleted' });
+  return withCors(NextResponse.json({ success: true, message: 'BPMN deleted' }), request);
       } else {
         return NextResponse.json(
           { error: 'BPMN not found' },
@@ -156,10 +157,10 @@ export async function DELETE(request: NextRequest) {
       
       deleted.forEach(k => delete tempStorage[k]);
       
-      return NextResponse.json({
-        success: true,
-        message: `Deleted ${deleted.length} items for session`
-      });
+        return withCors(NextResponse.json({
+          success: true,
+          message: `Deleted ${deleted.length} items for session`
+        }), request);
     }
     
     return NextResponse.json(
@@ -174,4 +175,8 @@ export async function DELETE(request: NextRequest) {
       { status: 500 }
     );
   }
+}
+
+export async function OPTIONS(request: NextRequest) {
+  return preflight(request);
 }

@@ -3,8 +3,12 @@
  */
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_BPMN_BACKEND_URL || 'http://localhost:8100';
-// When running in the browser, use the Next.js proxy to avoid CORS issues
-const BROWSER_PROXY_PREFIX = typeof window !== 'undefined' ? '/api/backend?path=' : undefined;
+// Offline / backend optional mode: when true, network failures return graceful empty data
+const OFFLINE_MODE = process.env.NEXT_PUBLIC_BPMN_OFFLINE_MODE === 'true';
+// Proxy toggle: enable only if explicitly requested via env var NEXT_PUBLIC_USE_API_PROXY = 'true'
+// This lets us bypass the proxy (option 2) without touching other working functionality.
+const USE_PROXY = typeof window !== 'undefined' && process.env.NEXT_PUBLIC_USE_API_PROXY === 'true';
+const BROWSER_PROXY_PREFIX = USE_PROXY ? '/api/backend?path=' : undefined;
 
 // Types
 export interface Process {
@@ -143,7 +147,7 @@ class ProcessApiService {
         url = `${BROWSER_PROXY_PREFIX}${encodeURIComponent(endpoint)}`;
       }
 
-      const response = await fetch(url, {
+  const response = await fetch(url, {
         headers: {
           'Content-Type': 'application/json',
           ...options.headers,
@@ -151,7 +155,8 @@ class ProcessApiService {
         ...options,
       });
 
-      const responseData = await response.json();
+  let responseData: any = null;
+  try { responseData = await response.json(); } catch { /* non-json */ }
       
       if (!response.ok) {
         // Handle validation errors (422) specially
@@ -175,6 +180,13 @@ class ProcessApiService {
     } catch (error) {
       console.error(`API request failed for ${endpoint}:`, error);
       const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
+      if (OFFLINE_MODE) {
+        // Return sensible empty structures based on heuristic of endpoint
+        if (/processes\/instances/.test(endpoint)) return { data: [] as any };
+        if (/processes\/?$/.test(endpoint) || /processes\?/.test(endpoint)) return { data: [] as any };
+        if (/templates/.test(endpoint)) return { data: [] as any };
+        return { error: `(offline) ${errorMessage}` };
+      }
       return { error: errorMessage };
     }
   }
@@ -397,6 +409,28 @@ class ProcessApiService {
       method: 'POST',
       body: JSON.stringify({ bpmn_xml: bpmnXml }),
     });
+  }
+
+  // Backend reachability ping (bypasses OFFLINE_MODE handling to know real status)
+  async pingBackend(timeoutMs: number = 4000): Promise<boolean> {
+    const controller = new AbortController();
+    const to = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      // Prefer /health if exists, fallback to a lightweight processes query
+      const healthUrl = `${this.baseUrl}/health`;
+      let resp: Response | null = null;
+      try {
+        resp = await fetch(healthUrl, { method: 'GET', signal: controller.signal });
+        if (resp.ok) return true;
+      } catch { /* ignore and fallback */ }
+      const probeUrl = `${this.baseUrl}/api/v1/processes/?limit=1`;
+      resp = await fetch(probeUrl, { method: 'GET', signal: controller.signal });
+      return resp.ok;
+    } catch {
+      return false;
+    } finally {
+      clearTimeout(to);
+    }
   }
 
   // File Upload

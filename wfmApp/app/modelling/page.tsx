@@ -68,12 +68,21 @@ export default function ModellingPage() {
             if (processesResponse.data) {
               setProcesses(processesResponse.data);
             } else if (processesResponse.error) {
-              setError(processesResponse.error);
+              setProcesses([]);
+              toast({
+                type: 'foreground',
+                title: 'Unable to reach backend or database. Please check your connection or try again later.'
+              });
+              return; // Exit early so outer catch doesn't trigger
             }
           } catch (err) {
-            // If there's an error, just set empty processes instead of throwing
             setProcesses([]);
+            toast({
+              type: 'foreground',
+              title: 'Unable to reach backend or database. Please check your connection or try again later.'
+            });
             console.log('No processes found or error occurred:', err);
+            return; // Exit early so outer catch doesn't trigger
           }
           break;
           
@@ -495,8 +504,11 @@ export default function ModellingPage() {
                   <p className="mt-2 text-gray-500">Loading processes...</p>
                 </div>
               ) : error ? (
-                <div className="text-center py-8">
+                <div className="text-center py-8 space-y-2">
                   <p className="text-red-500">{error}</p>
+                  {(process.env.NEXT_PUBLIC_BPMN_OFFLINE_MODE === 'true' || /offline|connrefused|failed to fetch/i.test(error)) && (
+                    <p className="text-xs text-gray-500">Backend unreachable (offline mode). Showing empty list.</p>
+                  )}
                 </div>
               ) : processes.length === 0 ? (
                 <div className="text-center py-8">
@@ -568,8 +580,11 @@ export default function ModellingPage() {
                   <p className="mt-2 text-gray-500">Loading instances...</p>
                 </div>
               ) : error ? (
-                <div className="text-center py-8">
+                <div className="text-center py-8 space-y-2">
                   <p className="text-red-500">{error}</p>
+                  {(process.env.NEXT_PUBLIC_BPMN_OFFLINE_MODE === 'true' || /offline|connrefused|failed to fetch/i.test(error)) && (
+                    <p className="text-xs text-gray-500">Backend unreachable (offline mode). Showing empty list.</p>
+                  )}
                 </div>
               ) : instances.length === 0 ? (
                 <div className="text-center py-8">
@@ -631,8 +646,11 @@ export default function ModellingPage() {
                   <p className="mt-2 text-gray-500">Loading templates...</p>
                 </div>
               ) : error ? (
-                <div className="text-center py-8">
+                <div className="text-center py-8 space-y-2">
                   <p className="text-red-500">{error}</p>
+                  {(process.env.NEXT_PUBLIC_BPMN_OFFLINE_MODE === 'true' || /offline|connrefused|failed to fetch/i.test(error)) && (
+                    <p className="text-xs text-gray-500">Backend unreachable (offline mode). Showing empty list.</p>
+                  )}
                 </div>
               ) : templates.length === 0 ? (
                 <div className="text-center py-8">

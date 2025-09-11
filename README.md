@@ -179,11 +179,6 @@ docker-compose down
 
 Update the following in `docker-compose.yml` for production:
 
-- MongoDB connection strings
-- Redis connection strings
-- JWT secret keys
-- Database passwords
-- API endpoints
 
 ### Development Environment
 
@@ -194,6 +189,91 @@ For local development, you can override environment variables:
 cp .env.example .env
 # Edit .env with your local configuration
 ```
+
+## Environment Variables
+
+### Offline Queue & Synchronization (BPMN Modeler)
+
+These flags control the client-side offline queue for BPMN diagrams when the backend is unreachable.
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `NEXT_PUBLIC_QUEUE_MAX_SIZE` | `20` | Maximum number of queued diagrams retained locally. Oldest is evicted when limit exceeded. |
+| `NEXT_PUBLIC_QUEUE_COMPRESSION` | `false` | If `true`, queued XML is gzip-compressed via `CompressionStream` when supported. Falls back to plain text if not available. |
+| `NEXT_PUBLIC_QUEUE_ENCRYPTION` | `false` | If `true`, queued payload (after optional compression) is encrypted with an AES-GCM key. The client now first attempts to fetch a server-distributed key from `/api/security/encryption-key` (ephemeral, in-memory) falling back to a locally generated key. |
+
+### BPMN Offline Sync & Conflict Handling (Enhanced)
+
+Recent enhancements to the BPMN modeler offline queue & conflict resolution:
+
+1. Semantic Structural Diff:
+   - Diffs are computed by parsing BPMN XML and comparing elements by `id` & `tagName`.
+   - Counts surfaced: Added elements, Remote-only elements, Modified elements.
+   - Additional semantic enrichment: adopted `camunda:assignee`, imported `extensionElements`, and documentation adoption when missing locally.
+
+2. Semantic Merge Strategy:
+   - Remote-only elements appended to the local diagram.
+   - Local changes always preserved (local wins for name/content already present).
+   - Missing local properties (name, documentation, `camunda:assignee`, `extensionElements`) are filled from remote.
+   - Future extension target: candidate groups, due dates, timers.
+
+3. Visual Diff Overlays:
+   - Added (green), Changed (amber), Remote-only (red) badges rendered via bpmn-js overlays during conflict modal.
+   - Overlays cleared automatically after resolution.
+
+4. Conflict Resolution Actions:
+   - Skip: Leaves item in queue.
+   - Overwrite: Local diagram overwrites remote.
+   - Merge: Performs semantic merge before overwrite.
+   - Rename: Stores local as a new filename (preserving remote original).
+
+5. Audit Logging & Persistence:
+   - Client posts conflict resolution events to `/api/audit/conflicts` with diff metadata.
+   - Server persists audit log (best-effort) to `tmp/conflict-audit.json` (override path with `AUDIT_LOG_DIR`).
+   - Download raw log: `GET /api/audit/conflicts/download` (returns JSON file).
+   - In-memory cache keeps last 200 (file rotation trims to 500 total for persistence).
+
+6. Security Note:
+   - Encryption key delivered from server endpoint (ephemeral, non-rotating demo). For production: implement key rotation & per-user scoping or wrap with KMS.
+
+### Audit Log Environment Variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `AUDIT_LOG_DIR` | `./tmp` | Directory for persisted conflict audit JSON file. |
+
+### New API Endpoints (BPMN Modeller Support)
+
+| Endpoint | Method | Purpose |
+|----------|--------|---------|
+| `/api/security/encryption-key` | GET | Returns AES-GCM JWK for encrypting offline queue entries (if enabled). |
+| `/api/audit/conflicts` | GET/POST | Retrieve or append conflict resolution audit records. |
+| `/api/audit/conflicts/download` | GET | Download raw persisted audit log JSON. |
+
+### Local Storage Keys (Updated)
+
+| Key | Purpose |
+|-----|---------|
+| `bpmn_pending_syncs_v2` | Metadata list of queued BPMN diagrams awaiting sync. |
+| `bpmn_queue_enc_key_v2_server` | Cached AES-GCM JWK (server-fetched or locally generated fallback). |
+| `bpmn_conflict_audit_v1` | Client-side rolling conflict event history (for quick inspection). |
+
+### Future Roadmap (Suggested)
+
+| Item | Description |
+|------|-------------|
+| Candidate Group Merge | Reconcile `camunda:candidateGroups` & `camunda:candidateUsers`. |
+| Timer/Event Detail Diff | Classify timer/event definition changes distinctly. |
+| BPMN Validation Gate | Run schema & lint pass pre-sync to avoid corrupt remote state. |
+| Key Rotation | Time or usage-based server key rotation with client re-fetch & re-encryption. |
+| Persistent Store | Replace in-memory + file with Redis / DB for multi-instance scaling. |
+
+Behavior Notes:
+* Compression happens before encryption for better ratios.
+* Each queued item stores metadata (hash, compression/encryption flags) in `localStorage` under `bpmn_pending_syncs_v2`.
+* Evictions emit an info toast identifying the removed diagram.
+* Encryption key (if enabled) persists under `bpmn_queue_enc_key_v1`.
+* Conflict detection on sync: if a remote temp item with the same filename exists, a modal prompts to Skip, Overwrite, or Merge (current merge = overwrite with local; future enhancement could implement a structural BPMN merge).
 
 ## Troubleshooting
 

@@ -101,8 +101,7 @@ class ExecutionState(Base):
     
     # Relationships
     workflow_instance: Mapped["WorkflowInstance"] = relationship(
-        "WorkflowInstance", 
-        back_populates="execution_states"
+        "WorkflowInstance"
     )
     
     def __repr__(self) -> str:

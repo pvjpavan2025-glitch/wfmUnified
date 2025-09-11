@@ -1,5 +1,7 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
+import { useOfflineContext } from '@/context/OfflineContext';
 import { processApiService } from '@/services/processApi';
+import { workflowApiService } from '@/services/workflowApi';
 import BpmnModeler from 'bpmn-js/lib/Modeler';
 import {
   BpmnPropertiesPanelModule,
@@ -27,6 +29,14 @@ interface BpmnModelerProps {
   isDirty: boolean;
 }
 
+// Import behavior env flags (build-time via Next.js)
+// If true, skip the direct browser fetch and go straight to proxy (useful when CORS or local ports are blocked)
+const IMPORT_PROXY_ONLY = process.env.NEXT_PUBLIC_IMPORT_PROXY_ONLY === 'true';
+// If true, try proxy first then fallback to direct (inverse of default order)
+const IMPORT_PROXY_FIRST = process.env.NEXT_PUBLIC_IMPORT_PROXY_FIRST === 'true';
+// Optional custom proxy route (defaults to /api/proxy-bpmn)
+const IMPORT_PROXY_ROUTE = process.env.NEXT_PUBLIC_IMPORT_PROXY_ROUTE || '/api/proxy-bpmn';
+
 const BpmnModelerComponent: React.FC<BpmnModelerProps> = ({ 
   onSave, 
   onClose, 
@@ -52,8 +62,345 @@ const BpmnModelerComponent: React.FC<BpmnModelerProps> = ({
   const [importMethod, setImportMethod] = useState<'url' | 'file'>('url');
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [toast, setToast] = useState<{message: string, type: 'success' | 'error' | 'info'} | null>(null);
+  const [conflictModal, setConflictModal] = useState<null | { local: any; remote: any; onResolve: (action: 'overwrite' | 'skip' | 'merge' | 'rename', opts?: { newFilename?: string }) => void }>(null);
+  const [diffPreview, setDiffPreview] = useState<{
+    added: number;
+    removed: number;
+    changed: number;
+    summary: string;
+    localOnly?: number;
+    remoteOnly?: number;
+    assigneeFilledCount?: number;
+    candidateGroupsFilledCount?: number;
+    candidateUsersFilledCount?: number;
+    dueDateFilledCount?: number;
+    extensionsImportedCount?: number;
+  } | null>(null);
   const [isManualImport, setIsManualImport] = useState(false);
   const manualImportRef = useRef(false);
+  // Offline + sync state (added)
+  const offlineCtx = (() => { try { return useOfflineContext(); } catch { return null; } })();
+  const [backendOnline, setBackendOnline] = useState<boolean>(offlineCtx?.backendOnline ?? true);
+  const [pendingSyncs, setPendingSyncs] = useState<PendingSyncItem[]>([]);
+  const [lastSyncAttempt, setLastSyncAttempt] = useState<number | null>(null);
+  const retryIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  // Forward declarations for sync logic (defined after function bodies for clarity)
+  const attemptSyncRef = useRef<() => Promise<void>>(async () => {});
+  const handleManualSync = useCallback(async () => {
+    if (attemptSyncRef.current) {
+      await attemptSyncRef.current();
+      if (pendingSyncs.length === 0 && backendOnline) {
+        setToast({ message: 'All pending diagrams synced', type: 'success' });
+      } else if (!backendOnline) {
+        setToast({ message: 'Backend still offline', type: 'info' });
+      } else {
+        setToast({ message: 'Some diagrams still pending', type: 'info' });
+      }
+    }
+  }, [pendingSyncs, backendOnline]);
+
+  // Temporary BPMN storage control flags
+  const TEMP_STORE_DISABLED = process.env.NEXT_PUBLIC_DISABLE_TEMP_STORE === 'true';
+  const tempStoreFailureRef = useRef<number>(0); // count consecutive failures
+  const TEMP_STORE_FAILURE_SILENCE_AFTER = 1; // after first shown failure, silence subsequent ones
+  const initialOffline = process.env.NEXT_PUBLIC_BPMN_OFFLINE_MODE === 'true';
+  const [offlineModeActive, setOfflineModeActive] = useState<boolean>(offlineCtx?.offlineModeActive ?? initialOffline);
+  // Queue config / feature flags
+  const QUEUE_MAX_SIZE = parseInt(process.env.NEXT_PUBLIC_QUEUE_MAX_SIZE || '20', 10);
+  const QUEUE_COMPRESSION = process.env.NEXT_PUBLIC_QUEUE_COMPRESSION === 'true';
+  const QUEUE_ENCRYPTION = process.env.NEXT_PUBLIC_QUEUE_ENCRYPTION === 'true';
+  const QUEUE_STORAGE_KEY_V1 = 'bpmn_pending_syncs';
+  const QUEUE_STORAGE_KEY_V2 = 'bpmn_pending_syncs_v2';
+
+  interface PendingSyncMeta {
+    compressed?: boolean;
+    encrypted?: boolean;
+    algo?: string; // compression algo
+    iv?: string;   // base64 IV for encryption
+    hash?: string; // sha256 of original xml
+    version?: number; // schema version
+  }
+
+  type PendingSyncItem = { key: string; filename: string; xml: string; created: number; meta?: PendingSyncMeta };
+
+  // Utility: base64 helpers
+  const toBase64 = (bytes: Uint8Array) => (typeof window === 'undefined') ? '' : window.btoa(String.fromCharCode(...bytes));
+  const fromBase64 = (b64: string) => {
+    if (typeof window === 'undefined') return new Uint8Array();
+    const bin = window.atob(b64);
+    const arr = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+    return arr;
+  };
+
+  // Utility: compute SHA-256 hash (hex)
+  const sha256 = async (data: string): Promise<string> => {
+    if (typeof window === 'undefined' || !window.crypto?.subtle) return '';
+    const enc = new TextEncoder().encode(data);
+    const digest = await window.crypto.subtle.digest('SHA-256', enc);
+    return Array.from(new Uint8Array(digest)).map(b => b.toString(16).padStart(2, '0')).join('');
+  };
+
+  // Encryption: server-assisted key (fallback to local if server unavailable)
+  const ensureEncryptionKey = async (): Promise<CryptoKey | null> => {
+    if (!QUEUE_ENCRYPTION) return null;
+    if (typeof window === 'undefined' || !window.crypto?.subtle) return null;
+    const stored = localStorage.getItem('bpmn_queue_enc_key_v2_server');
+    if (stored) {
+      try {
+        const jwk = JSON.parse(stored);
+        return await window.crypto.subtle.importKey('jwk', jwk, { name: 'AES-GCM' }, false, ['encrypt', 'decrypt']);
+      } catch { /* ignore */ }
+    }
+    // Try server endpoint
+    try {
+      const resp = await fetch('/api/security/encryption-key');
+      if (resp.ok) {
+        const data = await resp.json();
+        if (data?.key) {
+          localStorage.setItem('bpmn_queue_enc_key_v2_server', JSON.stringify(data.key));
+          return await window.crypto.subtle.importKey('jwk', data.key, { name: 'AES-GCM' }, false, ['encrypt', 'decrypt']);
+        }
+      }
+    } catch { /* ignore */ }
+    // Fallback generate local if server failed
+    try {
+      const key = await window.crypto.subtle.generateKey({ name: 'AES-GCM', length: 256 }, true, ['encrypt', 'decrypt']);
+      const jwk = await window.crypto.subtle.exportKey('jwk', key);
+      localStorage.setItem('bpmn_queue_enc_key_v2_server', JSON.stringify(jwk));
+      return key;
+    } catch { return null; }
+  };
+  // --- Semantic BPMN Parsing & Merge ---
+  interface SemanticEl { id: string; type: string; name?: string; documentation?: string; assignee?: string; candidateGroups?: string; candidateUsers?: string; dueDate?: string; extensionsHash?: string; raw: Element; }
+  const hashExtensions = (el: Element): string | undefined => {
+    const ext = Array.from(el.getElementsByTagName('bpmn:extensionElements'))[0];
+    if (!ext) return undefined;
+    // Simple hash via JSON of child tag names+attributes
+    const payload: any[] = [];
+    Array.from(ext.children).forEach(c => {
+      const attrs: Record<string,string> = {};
+      Array.from(c.attributes).forEach(a => attrs[a.name] = a.value);
+      payload.push({ tag: c.tagName, attrs });
+    });
+    try { return btoa(unescape(encodeURIComponent(JSON.stringify(payload)))); } catch { return undefined; }
+  };
+
+  const parseSemantic = (xml: string): Map<string, SemanticEl> => {
+    const map = new Map<string, SemanticEl>();
+    try {
+      const doc = new DOMParser().parseFromString(xml, 'application/xml');
+      if (doc.getElementsByTagName('parsererror').length) return map;
+      const collect = (el: Element) => {
+        const id = el.getAttribute('id');
+        if (id) {
+          const name = el.getAttribute('name') || undefined;
+          // documentation child
+          let documentation: string | undefined;
+          const docs = el.getElementsByTagName('bpmn:documentation');
+            if (docs && docs.length) documentation = docs[0].textContent || undefined;
+          // camunda:assignee attribute
+          const assignee = el.getAttribute('camunda:assignee') || undefined;
+          const candidateGroups = el.getAttribute('camunda:candidateGroups') || undefined;
+          const candidateUsers = el.getAttribute('camunda:candidateUsers') || undefined;
+          const dueDate = el.getAttribute('camunda:dueDate') || undefined;
+          const extensionsHash = hashExtensions(el);
+          map.set(id, { id, type: el.tagName, name, documentation, assignee, candidateGroups, candidateUsers, dueDate, extensionsHash, raw: el });
+        }
+        Array.from(el.children).forEach(c => collect(c as Element));
+      };
+      collect(doc.documentElement);
+    } catch { /* ignore */ }
+    return map;
+  };
+
+  const semanticMerge = (localXml: string, remoteXml: string): { merged: string; diffMeta: any } => {
+    try {
+      const parser = new DOMParser();
+      const localDoc = parser.parseFromString(localXml, 'application/xml');
+      const remoteDoc = parser.parseFromString(remoteXml, 'application/xml');
+      if (localDoc.getElementsByTagName('parsererror').length) return { merged: localXml, diffMeta: {} };
+      if (remoteDoc.getElementsByTagName('parsererror').length) return { merged: localXml, diffMeta: {} };
+      const lMap = parseSemantic(localXml); const rMap = parseSemantic(remoteXml);
+      const defs = localDoc.documentElement;
+  const added: string[] = []; const modified: string[] = []; const remoteOnly: string[] = []; const assigneeFilled: string[] = []; const extensionsImported: string[] = []; const candidateGroupsFilled: string[] = []; const candidateUsersFilled: string[] = []; const dueDateFilled: string[] = [];
+      // Merge remote-only
+      rMap.forEach((val, id) => { if (!lMap.has(id)) { try { defs.appendChild(localDoc.importNode(val.raw, true)); added.push(id); } catch {} } });
+      // Reconcile properties for overlapping
+      lMap.forEach((lVal, id) => {
+        const rVal = rMap.get(id);
+        if (!rVal) return;
+        let changed = false;
+        if (rVal.name && rVal.name !== lVal.name) {
+          if (!lVal.name) { lVal.raw.setAttribute('name', rVal.name); changed = true; }
+        }
+        if (rVal.documentation && !lVal.documentation) {
+            const docEl = localDoc.createElement('bpmn:documentation');
+            docEl.textContent = rVal.documentation;
+            lVal.raw.appendChild(docEl); changed = true;
+        }
+  if (rVal.assignee && !lVal.assignee) { lVal.raw.setAttribute('camunda:assignee', rVal.assignee); changed = true; assigneeFilled.push(id); }
+  if (rVal.candidateGroups && !lVal.candidateGroups) { lVal.raw.setAttribute('camunda:candidateGroups', rVal.candidateGroups); changed = true; candidateGroupsFilled.push(id); }
+  if (rVal.candidateUsers && !lVal.candidateUsers) { lVal.raw.setAttribute('camunda:candidateUsers', rVal.candidateUsers); changed = true; candidateUsersFilled.push(id); }
+  if (rVal.dueDate && !lVal.dueDate) { lVal.raw.setAttribute('camunda:dueDate', rVal.dueDate); changed = true; dueDateFilled.push(id); }
+        if (rVal.extensionsHash && rVal.extensionsHash !== lVal.extensionsHash) {
+          // Bring over extensionElements if local missing
+          const hasLocalExt = lVal.raw.getElementsByTagName('bpmn:extensionElements').length > 0;
+          if (!hasLocalExt) {
+            const remoteExt = rVal.raw.getElementsByTagName('bpmn:extensionElements')[0];
+            if (remoteExt) {
+              lVal.raw.appendChild(localDoc.importNode(remoteExt, true));
+              changed = true; extensionsImported.push(id);
+            }
+          }
+        }
+        if (changed) modified.push(id);
+      });
+      // Track remote-only for diff meta
+      rMap.forEach((v, id) => { if (!lMap.has(id)) remoteOnly.push(id); });
+      const merged = new XMLSerializer().serializeToString(localDoc);
+  return { merged, diffMeta: { added, modified, remoteOnly, assigneeFilled, extensionsImported, candidateGroupsFilled, candidateUsersFilled, dueDateFilled } };
+    } catch { return { merged: localXml, diffMeta: {} }; }
+  };
+
+  // Visual overlays for diff
+  const applyDiffOverlays = (modeler: BpmnModeler, diff: { added?: string[]; modified?: string[]; remoteOnly?: string[] }) => {
+    try {
+      const overlays = (modeler as any).get('overlays');
+      const elementRegistry = modeler.get('elementRegistry');
+      const addBadge = (id: string, color: string, title: string) => {
+        const el = elementRegistry.get(id); if (!el) return;
+        overlays.add(id, {
+          position: { bottom: 0, right: 0 },
+          html: `<div style="background:${color};color:#fff;padding:2px 4px;border-radius:3px;font-size:9px;opacity:0.85" title="${title}">${title[0]}</div>`
+        });
+      };
+      diff.added?.forEach(id => addBadge(id, '#16a34a', 'Added'));
+      diff.modified?.forEach(id => addBadge(id, '#d97706', 'Changed'));
+      diff.remoteOnly?.forEach(id => addBadge(id, '#dc2626', 'Remote')); // remote only (not in local before merge)
+    } catch { /* ignore */ }
+  };
+
+  const clearDiffOverlays = (modeler: BpmnModeler) => {
+    try { const overlays = (modeler as any).get('overlays'); overlays.clear(); } catch { /* ignore */ }
+  };
+
+  // Audit logging helper
+  const logConflictAction = async (data: { filename: string; action: string; diff?: any }) => {
+    const sessionId = sessionStorage.getItem('sessionId') || 'session';
+    try {
+      fetch('/api/audit/conflicts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...data, sessionId })
+      }).catch(()=>{});
+      // Local copy (append)
+      const localKey = 'bpmn_conflict_audit_v1';
+      const existing = JSON.parse(localStorage.getItem(localKey) || '[]');
+      existing.push({ ts: Date.now(), ...data });
+      if (existing.length > 300) existing.splice(0, existing.length - 300);
+      localStorage.setItem(localKey, JSON.stringify(existing));
+    } catch { /* ignore */ }
+  };
+
+  const encryptString = async (plain: string): Promise<{ b64: string; iv: string } | null> => {
+    if (!QUEUE_ENCRYPTION) return null;
+    const key = await ensureEncryptionKey();
+    if (!key) return null;
+    const iv = crypto.getRandomValues(new Uint8Array(12));
+    const enc = new TextEncoder().encode(plain);
+    const ct = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, enc);
+    return { b64: toBase64(new Uint8Array(ct)), iv: toBase64(iv) };
+  };
+
+  const decryptString = async (payloadB64: string, ivB64: string): Promise<string> => {
+    const key = await ensureEncryptionKey();
+    if (!key) return '';
+    const iv = fromBase64(ivB64);
+    const data = fromBase64(payloadB64);
+    const pt = await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, key, data);
+    return new TextDecoder().decode(pt);
+  };
+
+  // Compression helpers (CompressionStream API only; graceful fallback)
+  const compressIfNeeded = async (text: string): Promise<{ encoded: string; algo?: string; compressed: boolean }> => {
+    if (!QUEUE_COMPRESSION) return { encoded: text, compressed: false };
+    try {
+      if (typeof CompressionStream === 'undefined') return { encoded: text, compressed: false };
+      const cs = new CompressionStream('gzip');
+      const writer = (cs.writable as any).getWriter();
+      await writer.write(new TextEncoder().encode(text));
+      await writer.close();
+      const compressed = await new Response(cs.readable).arrayBuffer();
+      return { encoded: toBase64(new Uint8Array(compressed)), algo: 'gzip', compressed: true };
+    } catch {
+      return { encoded: text, compressed: false };
+    }
+  };
+
+  const decompressIfNeeded = async (payload: PendingSyncItem): Promise<string> => {
+    const meta = payload.meta;
+    if (!meta?.compressed) return payload.xml; // xml field stores raw or encoded depending on compressed flag
+    try {
+      if (typeof DecompressionStream === 'undefined') return payload.xml; // can't decompress
+      const bin = fromBase64(payload.xml);
+  const ds = new DecompressionStream((meta.algo as CompressionFormat) || 'gzip');
+      const writer = (ds.writable as any).getWriter();
+      await writer.write(bin);
+      await writer.close();
+      const buf = await new Response(ds.readable).arrayBuffer();
+      return new TextDecoder().decode(buf);
+    } catch {
+      return payload.xml; // fallback
+    }
+  };
+
+  // Load persisted queue (upgrade v1 to v2)
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    try {
+      const v2 = localStorage.getItem(QUEUE_STORAGE_KEY_V2);
+      if (v2) {
+        const parsed: PendingSyncItem[] = JSON.parse(v2);
+        setPendingSyncs(parsed as any);
+        return;
+      }
+      const legacy = localStorage.getItem(QUEUE_STORAGE_KEY_V1);
+      if (legacy) {
+        const parsed: any[] = JSON.parse(legacy);
+        const upgraded: PendingSyncItem[] = parsed.map(it => ({ ...it, meta: { version: 1 } }));
+        setPendingSyncs(upgraded as any);
+        localStorage.setItem(QUEUE_STORAGE_KEY_V2, JSON.stringify(upgraded));
+      }
+    } catch { /* ignore */ }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Persist queue v2
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    try { localStorage.setItem(QUEUE_STORAGE_KEY_V2, JSON.stringify(pendingSyncs)); } catch { /* ignore */ }
+    offlineCtx?.setPendingSyncCount?.(pendingSyncs.length);
+  }, [pendingSyncs]);
+
+  // Mirror state to context
+  useEffect(() => { offlineCtx?.setBackendOnline?.(backendOnline); }, [backendOnline, offlineCtx]);
+  useEffect(() => { offlineCtx?.setOfflineModeActive?.(offlineModeActive); }, [offlineModeActive, offlineCtx]);
+
+  const [queueCollapsed, setQueueCollapsed] = useState<boolean>(() => {
+    if (typeof window === 'undefined') return false;
+    try { return localStorage.getItem('bpmn_queue_collapsed') === '1'; } catch { return false; }
+  });
+
+  // Ensure camunda namespace is present so Camunda properties provider activates element groups
+  const ensureCamundaNamespace = useCallback((rawXml: string | undefined | null): string => {
+    if (!rawXml) return '';
+    if (/xmlns:camunda="http:\/\/camunda.org\/schema\/1.0\/bpmn"/.test(rawXml)) return rawXml;
+    return rawXml.replace(/<bpmn:definitions([^>]*)>/, (match, attrs) => {
+      if (/xmlns:camunda=/.test(attrs)) return match; // already injected inside tag
+      return `<bpmn:definitions${attrs} xmlns:camunda="http://camunda.org/schema/1.0/bpmn">`;
+    });
+  }, []);
 
   // Use the safe BPMN modeler hook
   const {
@@ -116,7 +463,6 @@ const BpmnModelerComponent: React.FC<BpmnModelerProps> = ({
         try {
           const existing = (window as any).__wfm_bpmn_modeler_active as BpmnModeler | undefined;
           if (existing && typeof existing.destroy === 'function') {
-            console.log('🧹 Destroying previously active global BPMN modeler');
             try { existing.destroy(); } catch (e) { console.warn('Error destroying existing global modeler', e); }
             delete (window as any).__wfm_bpmn_modeler_active;
           }
@@ -129,7 +475,6 @@ const BpmnModelerComponent: React.FC<BpmnModelerProps> = ({
           // Clear the properties panel first to prevent duplicates
           if (propertiesPanelRef.current) {
             propertiesPanelRef.current.innerHTML = '';
-            console.log('🧹 Cleared properties panel content');
           }
           
           const selectors = ['.djs-container', '.bpmn-js', '.diagram-js', '.djs-minimap', '.bpmn-js-minimap', '.bio-properties-panel'];
@@ -138,7 +483,6 @@ const BpmnModelerComponent: React.FC<BpmnModelerProps> = ({
               if (!containerRef.current?.contains(el) && !propertiesPanelRef.current?.contains(el) && !minimapRef.current?.contains(el)) {
                 // Only remove if element is outside our intended containers
                 (el as HTMLElement).remove();
-                console.log('🧹 Removed dangling diagram element', sel);
               }
             });
           });
@@ -172,6 +516,57 @@ const BpmnModelerComponent: React.FC<BpmnModelerProps> = ({
 
         // Set up event listeners AFTER canvas is ready
         const eventBus = newModeler.get('eventBus') as any;
+
+        // Instrument selection service to trace who calls select() - debug only
+        try {
+          const selectionService = newModeler.get('selection');
+          if (selectionService && !selectionService.__wrappedForDebug) {
+            const origSelect = selectionService.select.bind(selectionService);
+            selectionService.select = function(...args: any[]) {
+              try {
+                const arg = args && args[0];
+                const id = Array.isArray(arg) ? (arg[0]?.id) : (arg?.id || arg);
+
+                console.log('🔔 selection.select called with:', {
+                  args: args,
+                  id: id,
+                  currentSelection: selectionService.get ? selectionService.get().map((el: any) => ({ id: el.id, type: el.type })) : 'no get method'
+                });
+
+                // Prevent clearing selection if current selection contains a task
+                if (!arg || (Array.isArray(arg) && arg.length === 0)) {
+                  const currentSelection = selectionService.get && selectionService.get();
+                  if (currentSelection && currentSelection.length > 0) {
+                    const primary = currentSelection[0];
+                    if (primary && primary.businessObject &&
+                        (primary.businessObject.$type === 'bpmn:UserTask' ||
+                         primary.businessObject.$type === 'bpmn:ServiceTask' ||
+                         primary.businessObject.$type === 'bpmn:BusinessRuleTask' ||
+                         primary.businessObject.$type === 'bpmn:ReceiveTask' ||
+                         primary.businessObject.$type === 'bpmn:SendTask' ||
+                         primary.businessObject.$type === 'bpmn:ManualTask' ||
+                         primary.businessObject.$type === 'bpmn:ScriptTask')) {
+                      console.log('🛡️ BLOCKING selection clear - task currently selected:', {
+                        taskId: primary.id,
+                        taskType: primary.businessObject.$type,
+                        taskName: primary.businessObject.name
+                      });
+                      return; // Don't clear selection
+                    }
+                  }
+                }
+
+                console.log('✅ Allowing selection change');
+              } catch (e) {
+                console.warn('🔔 selection.select logging failed', e);
+              }
+              return origSelect(...args);
+            };
+            (selectionService as any).__wrappedForDebug = true;
+          }
+        } catch (e) {
+          console.warn('⚠️ Could not wrap selection service for debug', e);
+        }
         
         // Create a debounced function to prevent excessive events
         let dirtyChangeTimeout: NodeJS.Timeout | null = null;
@@ -183,27 +578,44 @@ const BpmnModelerComponent: React.FC<BpmnModelerProps> = ({
             console.log('🔄 Debounced dirty change');
             onDirtyChange(true);
           }, 150); // 150ms debounce
-        };
-        
-        // Listen for element selection changes
+        };        // Listen for element selection changes
         eventBus.on('selection.changed', (event: any) => {
           const { newSelection } = event;
-          if (newSelection && newSelection.length > 0) {
-            setSelectedElement(newSelection[0]);
-          } else {
-            setSelectedElement(null);
+          console.log('🎯 selection.changed event fired:', {
+            newSelectionCount: newSelection?.length || 0,
+            newSelection: newSelection?.map((el: any) => ({
+              id: el.id,
+              type: el.type,
+              businessObjectType: el.businessObject?.$type,
+              name: el.businessObject?.name
+            })) || []
+          });
+          try {
+            if (newSelection && newSelection.length > 0) {
+              const primary = newSelection[0];
+              setSelectedElement(primary);
+              // Ensure the properties panel remains attached to our container and refreshes
+              try {
+                if (newModeler) {
+                  const propertiesPanelSvc = newModeler.get('propertiesPanel');
+                  if (propertiesPanelSvc && propertiesPanelRef.current) {
+                    propertiesPanelSvc.attachTo(propertiesPanelRef.current);
+                  }
+                }
+              } catch (e) { /* noop */ }
+            } else {
+              setSelectedElement(null);
+            }
+          } catch (e) {
+            console.warn('⚠️ selection.changed handler error:', e);
           }
-        });
-
-        // Primary change detection - command stack is the most reliable
+        });        // Primary change detection - command stack is the most reliable
         eventBus.on('commandStack.changed', () => {
-          console.log('� Command stack changed - diagram was modified');
           debouncedDirtyChange();
         });
 
         // Backup change detection for edge cases  
         eventBus.on('elements.changed', () => {
-          console.log('� Elements changed event');
           debouncedDirtyChange();
         });
 
@@ -238,7 +650,8 @@ const BpmnModelerComponent: React.FC<BpmnModelerProps> = ({
         // Handle initial content based on props
         if (initialXml) {
           console.log('📄 Loading initial XML...');
-          await importXmlSafely(newModeler, initialXml, 'initial-load');
+          const xmlWithNs = ensureCamundaNamespace(initialXml);
+          await importXmlSafely(newModeler, xmlWithNs, 'initial-load');
           onDirtyChange(false);
         } else if (autoCreateDiagram) {
           console.log('🆕 Auto-creating new diagram...');
@@ -275,7 +688,6 @@ const BpmnModelerComponent: React.FC<BpmnModelerProps> = ({
       // Destroy the modeler instance and clean up any leftover DOM
       try {
         if (newModeler && typeof newModeler.destroy === 'function') {
-          console.log('🧹 Cleaning up BPMN modeler (local)...');
           try { newModeler.destroy(); } catch (destroyErr) { console.warn('⚠️ Error during modeler cleanup:', destroyErr); }
         }
       } catch (e) {
@@ -326,32 +738,32 @@ const BpmnModelerComponent: React.FC<BpmnModelerProps> = ({
           console.log('❌ No modeler available');
           return;
         }
-        
+
         try {
           const elementRegistry = modeler.get('elementRegistry');
           const canvas = modeler.get('canvas');
           const elements = elementRegistry.getAll();
-          
+
           console.log('🔍 BPMN Debug Check:');
           console.log('📊 Elements in registry:', elements.length);
           console.log('📊 Elements details:', elements.map((el: any) => ({ id: el.id, type: el.type })));
           console.log('🎨 Canvas viewbox:', canvas.viewbox());
           console.log('🎨 Canvas zoom:', canvas.zoom());
-          
+
           const rootElement = canvas.getRootElement();
           console.log('🌳 Root element:', rootElement);
-          
+
           // Check DOM rendering
           const canvasContainer = canvas.getContainer();
           const svgElement = canvasContainer?.querySelector('svg');
           const shapeElements = canvasContainer?.querySelectorAll('[data-element-id]');
-          
+
           console.log('🖼️ DOM RENDERING CHECK:');
           console.log('  - Canvas container:', canvasContainer);
           console.log('  - SVG element:', svgElement);
           console.log('  - SVG dimensions:', svgElement ? `${svgElement.getAttribute('width')}x${svgElement.getAttribute('height')}` : 'No SVG');
           console.log('  - Shape elements found:', shapeElements?.length || 0);
-          
+
           // Check element positions and visibility
           if (shapeElements && shapeElements.length > 0) {
             console.log('  - First 3 shape elements:');
@@ -366,7 +778,7 @@ const BpmnModelerComponent: React.FC<BpmnModelerProps> = ({
               });
             });
           }
-          
+
           return {
             elementsCount: elements.length,
             elements: elements,
@@ -400,19 +812,19 @@ const BpmnModelerComponent: React.FC<BpmnModelerProps> = ({
               const canvasContainer = canvas.getContainer();
               const svgElement = canvasContainer?.querySelector('svg');
               const shapeElements = canvasContainer?.querySelectorAll('[data-element-id]');
-              
+
               // Force container refresh
               if (canvasContainer) {
                 canvasContainer.style.transform = 'translateZ(0)';
                 setTimeout(() => canvasContainer.style.transform = '', 50);
               }
-              
+
               // Force SVG refresh
               if (svgElement) {
                 svgElement.style.opacity = '0.99';
                 setTimeout(() => svgElement.style.opacity = '1', 50);
               }
-              
+
               // Force shape visibility
               if (shapeElements) {
                 Array.from(shapeElements).forEach((el: any) => {
@@ -421,7 +833,7 @@ const BpmnModelerComponent: React.FC<BpmnModelerProps> = ({
                   el.style.display = 'block';
                 });
               }
-              
+
               canvas.zoom('fit-viewport');
               console.log('✅ Visibility forced!');
             }
@@ -431,22 +843,18 @@ const BpmnModelerComponent: React.FC<BpmnModelerProps> = ({
           return null;
         }
       };
-      
+
       console.log('🛠️ Debug helper __debug_check() available in console');
     }
-  }, []);
-
-  // Separate effect to handle XML changes without reinitializing modeler
+  }, []);  // Separate effect to handle XML changes without reinitializing modeler
   useEffect(() => {
     // COMPLETELY DISABLE EFFECT DURING MANUAL IMPORTS
     if (isManualImport || manualImportRef.current) {
-      console.log('📥 SKIPPING effect import - manual import in progress');
       return;
     }
     
     // Skip effect if no modeler or XML
     if (!modelerRef.current || !xml || xml === initialXml) {
-      console.log('📥 SKIPPING effect import - no XML change or no modeler');
       return;
     }
     
@@ -454,46 +862,34 @@ const BpmnModelerComponent: React.FC<BpmnModelerProps> = ({
     const now = Date.now();
     if (!window.__lastManualImport) window.__lastManualImport = 0;
     if (now - window.__lastManualImport < 10000) {
-      console.log('📥 SKIPPING effect import - recent manual import detected');
       return;
     }
     
     // Additional check: Don't run if we just imported from URL/file
     if (window.__recent_manual_import === true) {
-      console.log('📥 SKIPPING effect import - manual import flag detected');
       return;
     }
 
     // CHECK XML LENGTH TO PREVENT OVERRIDING LARGE IMPORTS
     if (xml.length < 1000 && window.__lastManualImport && (now - window.__lastManualImport < 30000)) {
-      console.log('📥 SKIPPING effect import - small XML might override recent large import');
-      console.log(`  - Current XML: ${xml.length} chars, Recent manual import: ${(now - window.__lastManualImport)/1000}s ago`);
       return;
     }
-
-    console.log('⚠️ EFFECT IMPORT RUNNING - this might override manual import!');
-    console.log('  - XML length:', xml.length);
-    console.log('  - XML preview:', xml.substring(0, 200));
-    console.log('  - Initial XML length:', initialXml?.length || 0);
 
     const importXmlContent = async () => {
       try {
         setIsLoading(true);
         setError('');
-        console.log('📥 Importing XML content via effect...');
         
         await importXmlSafely(modelerRef.current!, xml, 'xml-change');
         
         // Ensure proper viewport fitting after import
         try {
           await zoomSafely(modelerRef.current!, 'fit-viewport');
-          console.log('🔍 Viewport fitted after XML import');
         } catch (e) {
           console.debug('Could not fit viewport after import', e);
         }
         
         onDirtyChange(false);
-        console.log('✅ XML content imported successfully with viewport fitted');
         
       } catch (err: any) {
         console.error('❌ Error importing XML content:', err);
@@ -516,7 +912,6 @@ const BpmnModelerComponent: React.FC<BpmnModelerProps> = ({
   // Helper function to completely clear modeler for import override
   const clearModelerForImport = async (modeler: any, operationType: string) => {
     try {
-      console.log(`🧹 Completely clearing modeler for ${operationType}...`);
       
       // Get core services
       const canvas = modeler.get('canvas');
@@ -525,13 +920,11 @@ const BpmnModelerComponent: React.FC<BpmnModelerProps> = ({
       // Remove root element first
       const rootElement = canvas.getRootElement();
       if (rootElement) {
-        console.log('🗑️ Removing root element:', rootElement.id);
         canvas.removeRootElement();
       }
       
       // Clear element registry completely
       const allElements = elementRegistry.getAll().slice(); // Create copy to avoid modification during iteration
-      console.log('🗑️ Clearing', allElements.length, 'elements from registry');
       
       allElements.forEach((element: any) => {
         try {
@@ -545,10 +938,7 @@ const BpmnModelerComponent: React.FC<BpmnModelerProps> = ({
       });
       
       // Create a completely new diagram to reset internal state
-      console.log('🆕 Creating fresh diagram...');
       await (modeler as any).createDiagram();
-      
-      console.log(`✅ Modeler cleared successfully for ${operationType}`);
       
     } catch (clearError) {
       console.warn(`Could not clear existing diagram, proceeding with ${operationType}:`, clearError);
@@ -556,35 +946,271 @@ const BpmnModelerComponent: React.FC<BpmnModelerProps> = ({
   };
 
   // Store BPMN in Redis temporarily
-  const storeBpmnInRedis = async (xml: string, filename: string) => {
-    try {
-      const sessionId = sessionStorage.getItem('sessionId') || `session_${Date.now()}`;
-      if (!sessionStorage.getItem('sessionId')) {
-        sessionStorage.setItem('sessionId', sessionId);
-      }
+  const storeBpmnInRedis = async (originalXml: string, filename: string) => {
+    // Always ensure a session id (even if remote storage disabled)
+    const sessionId = sessionStorage.getItem('sessionId') || `session_${Date.now()}`;
+    if (!sessionStorage.getItem('sessionId')) {
+      sessionStorage.setItem('sessionId', sessionId);
+    }
 
+    // Prepare queued item builder with compression/encryption + hash
+    const prepareQueuedItem = async (xmlForQueue: string): Promise<PendingSyncItem> => {
+      const key = `bpmn_temp_${filename}_${Date.now()}`;
+      const hash = await sha256(xmlForQueue).catch(() => '');
+      // compression
+      const comp = await compressIfNeeded(xmlForQueue);
+      let storedXml = comp.encoded;
+      const meta: PendingSyncMeta = { compressed: comp.compressed, algo: comp.algo, version: 2, hash };
+      // encryption (applied after compression to storedXml)
+      if (QUEUE_ENCRYPTION) {
+        const enc = await encryptString(storedXml);
+        if (enc) {
+          storedXml = enc.b64;
+          meta.encrypted = true;
+          meta.iv = enc.iv;
+        }
+      }
+      return { key, filename, xml: storedXml, created: Date.now(), meta };
+    };
+
+    const enqueue = async (xmlToStore: string) => {
+      const item = await prepareQueuedItem(xmlToStore);
+      // Enforce queue size limit
+      setPendingSyncs(prev => {
+        let next = [...prev];
+        if (next.length >= QUEUE_MAX_SIZE) {
+          const removed = next.shift();
+          showToast(`Queue full (>${QUEUE_MAX_SIZE}), evicted oldest: ${removed?.filename}`, 'info');
+        }
+        next.push(item);
+        return next as any;
+      });
+      try { sessionStorage.setItem(item.key, xmlToStore); } catch { /* ignore */ }
+      console.info('[TempStore][OfflineQueue] Queued diagram for later sync:', item.key);
+      return item;
+    };
+
+    // If offline mode active or backend currently offline, queue
+    if (offlineModeActive || !backendOnline) {
+      const item = await enqueue(originalXml);
+      return { key: item.key, offline: true, queued: true };
+    }
+
+    // If disabled via env flag, silently fallback to sessionStorage
+    if (TEMP_STORE_DISABLED) {
+      const key = `bpmn_temp_${filename}_${Date.now()}`;
+      sessionStorage.setItem(key, xml);
+      console.info('[TempStore] Disabled via NEXT_PUBLIC_DISABLE_TEMP_STORE, used sessionStorage key:', key);
+      return { key, disabled: true };
+    }
+
+    try {
       const response = await processApiService.storeBpmnTemporarily({
-        xml,
+        xml: originalXml,
         filename,
+        // Provide both snake & camel case to support either backend expectation
         session_id: sessionId,
+        // @ts-ignore add camelCase for possible backend variant
+        sessionId,
         overwrite: true,
       });
 
       if (response.data?.success) {
+        tempStoreFailureRef.current = 0; // reset failures
         showToast(`BPMN stored temporarily: ${response.data.message}`, 'success');
         return response.data;
-      } else {
-        throw new Error(response.error || 'Failed to store BPMN temporarily');
       }
+      throw new Error(response.error || 'Failed to store BPMN temporarily');
     } catch (error: any) {
-      console.warn('Temporary storage failed:', error);
-      showToast(`Storage unavailable: ${error.message}`, 'error');
-      // Fallback to sessionStorage
-      const key = `bpmn_temp_${filename}_${Date.now()}`;
-      sessionStorage.setItem(key, xml);
-      return { key };
+      tempStoreFailureRef.current += 1;
+      const isConnRefused = /fetch|connrefused|connection refused|econnrefused/i.test(error?.message || '');
+      const item = await enqueue(originalXml);
+      setBackendOnline(false);
+      setOfflineModeActive(true);
+      const baseMsg = isConnRefused ? 'Backend offline, queued locally' : 'Temp storage failed, queued locally';
+      if (tempStoreFailureRef.current <= TEMP_STORE_FAILURE_SILENCE_AFTER) {
+        showToast(`${baseMsg}. (key ${item.key})`, 'error');
+      }
+      console.warn('Temporary storage failure (queued):', { error, key: item.key });
+      return { key: item.key, fallback: true, queued: true };
     }
   };
+
+  // Attempt background sync of queued diagrams
+  const attemptSync = useCallback(async () => {
+    if (pendingSyncs.length === 0) return;
+    const reachable = await processApiService.pingBackend(2500);
+    if (!reachable) {
+      setBackendOnline(false);
+      return;
+    }
+    setBackendOnline(true);
+    const remaining: typeof pendingSyncs = [];
+    // Preload existing remote temp items for conflict detection
+    const sessionId = (sessionStorage.getItem('sessionId') || 'session_sync');
+    let remoteItems: any[] = [];
+    try {
+      const remoteResp = await fetch(`/api/bpmn/temp-store?sessionId=${encodeURIComponent(sessionId)}`);
+      if (remoteResp.ok) {
+        const json = await remoteResp.json();
+        if (json?.data && Array.isArray(json.data)) remoteItems = json.data;
+      }
+    } catch { /* ignore */ }
+    const remoteIndex: Record<string, any> = {};
+    remoteItems.forEach(it => { if (it.filename) remoteIndex[it.filename] = it; });
+    for (const item of pendingSyncs) {
+      try {
+        // Reconstruct original XML (decompress & decrypt as needed)
+        let originalXml = item.xml;
+        if (item.meta?.encrypted && item.meta?.iv) {
+          try { originalXml = await decryptString(originalXml, item.meta.iv); } catch { /* ignore */ }
+        }
+        if (item.meta?.compressed) {
+          try { originalXml = await decompressIfNeeded(item); } catch { /* ignore */ }
+        }
+        // Conflict detection: if remote with same filename exists, produce diff metrics
+        const remote = remoteIndex[item.filename];
+        if (remote) {
+          const { merged, diffMeta } = semanticMerge(originalXml, remote.xml || '');
+          const added = diffMeta.added?.length || 0;
+          const removed = diffMeta.remoteOnly?.length || 0; // remote-only relative to previous local
+          const changed = diffMeta.modified?.length || 0;
+          const summary = `${added} added, ${removed} remote-only, ${changed} modified elements`;
+          setDiffPreview({
+            added,
+            removed,
+            changed,
+            summary,
+            localOnly: added,
+            remoteOnly: removed,
+            assigneeFilledCount: diffMeta.assigneeFilled?.length || 0,
+            candidateGroupsFilledCount: diffMeta.candidateGroupsFilled?.length || 0,
+            candidateUsersFilledCount: diffMeta.candidateUsersFilled?.length || 0,
+            dueDateFilledCount: diffMeta.dueDateFilled?.length || 0,
+            extensionsImportedCount: diffMeta.extensionsImported?.length || 0
+          });
+          // Apply overlays (show before modal)
+          if (modelerRef.current) {
+            clearDiffOverlays(modelerRef.current);
+            applyDiffOverlays(modelerRef.current, diffMeta);
+          }
+          // Pause sync and ask user
+          await new Promise<void>((resolve) => {
+            setConflictModal({
+              local: { filename: item.filename, xml: originalXml },
+              remote,
+              onResolve: async (action, opts) => {
+                setConflictModal(null);
+                if (modelerRef.current) clearDiffOverlays(modelerRef.current);
+                if (action === 'skip') {
+                  remaining.push(item); // keep for later retry
+                  logConflictAction({ filename: item.filename, action: 'skip', diff: diffMeta });
+                } else if (action === 'overwrite') {
+                  try {
+                    const res = await processApiService.storeBpmnTemporarily({
+                      xml: originalXml, // local wins
+                      filename: item.filename,
+                      session_id: sessionId,
+                      overwrite: true,
+                    });
+                    if (res.data?.success) {
+                      try { sessionStorage.removeItem(item.key); } catch {}
+                      console.info('[Sync] Overwrote remote diagram', item.filename);
+                      logConflictAction({ filename: item.filename, action: 'overwrite', diff: diffMeta });
+                    } else {
+                      remaining.push(item);
+                    }
+                  } catch {
+                    remaining.push(item);
+                  }
+                } else if (action === 'merge') {
+                  // Semantic merge (preserve remote-only + reconcile basics)
+                  const { merged: mergedXml } = semanticMerge(originalXml, remote.xml || '');
+                  try {
+                    const res = await processApiService.storeBpmnTemporarily({
+                      xml: mergedXml,
+                      filename: item.filename,
+                      session_id: sessionId,
+                      overwrite: true,
+                    });
+                    if (res.data?.success) {
+                      try { sessionStorage.removeItem(item.key); } catch {}
+                      console.info('[Sync] Semantic merged diagram', item.filename);
+                      logConflictAction({ filename: item.filename, action: 'merge', diff: diffMeta });
+                    } else {
+                      remaining.push(item);
+                    }
+                  } catch {
+                    remaining.push(item);
+                  }
+                } else if (action === 'rename') {
+                  const newFilename = opts?.newFilename || `copy_${Date.now()}_${item.filename}`;
+                  try {
+                    const res = await processApiService.storeBpmnTemporarily({
+                      xml: originalXml,
+                      filename: newFilename,
+                      session_id: sessionId,
+                      overwrite: true,
+                    });
+                    if (res.data?.success) {
+                      try { sessionStorage.removeItem(item.key); } catch {}
+                      console.info('[Sync] Stored renamed diagram', newFilename);
+                      logConflictAction({ filename: newFilename, action: 'rename', diff: diffMeta });
+                    } else {
+                      remaining.push(item);
+                    }
+                  } catch {
+                    remaining.push(item);
+                  }
+                }
+                resolve();
+              }
+            });
+          });
+          continue; // move to next item after user resolves
+        }
+        const res = await processApiService.storeBpmnTemporarily({
+          xml: originalXml,
+          filename: item.filename,
+          session_id: (sessionStorage.getItem('sessionId') || 'session_sync'),
+          overwrite: true,
+        });
+        if (res.data?.success) {
+          try { sessionStorage.removeItem(item.key); } catch {}
+          console.info('[Sync] Uploaded queued diagram', item.filename);
+        } else {
+          remaining.push(item);
+        }
+      } catch (e) {
+        remaining.push(item);
+      }
+    }
+    setPendingSyncs(remaining);
+  }, [pendingSyncs]);
+
+  attemptSyncRef.current = attemptSync;
+
+  // Poll while offline
+  useEffect(() => {
+    if (backendOnline || pendingSyncs.length === 0) {
+      if (retryIntervalRef.current) {
+        clearInterval(retryIntervalRef.current);
+        retryIntervalRef.current = null;
+      }
+      return;
+    }
+    if (!retryIntervalRef.current) {
+      retryIntervalRef.current = setInterval(() => {
+        attemptSync();
+      }, 10000);
+    }
+    return () => {
+      if (retryIntervalRef.current) {
+        clearInterval(retryIntervalRef.current);
+        retryIntervalRef.current = null;
+      }
+    };
+  }, [backendOnline, pendingSyncs, attemptSync]);
 
   const handleToggleTransactionBoundaries = () => {
     // Toggle transaction boundaries visualization
@@ -634,33 +1260,16 @@ const BpmnModelerComponent: React.FC<BpmnModelerProps> = ({
   const handleSave = async () => {
     if (!modelerRef.current) return;
     try {
-      console.log('💾 Starting save process...');
       
       // Force a fresh XML export directly from the modeler
-      console.log('🔄 Forcing fresh XML export from modeler...');
       const freshResult = await (modelerRef.current as any).saveXML({ format: true });
       const freshXml = freshResult.xml || '';
-      
-      console.log('🔍 Fresh XML export results:');
-      console.log('📄 Fresh XML Length:', freshXml.length);
-      console.log('📄 Fresh XML Preview (first 500 chars):', freshXml.substring(0, 500));
-      console.log('📄 Fresh XML Contains elements:', {
-        hasStartEvent: freshXml.includes('startEvent'),
-        hasTask: freshXml.includes('task') || freshXml.includes('Task'),
-        hasEndEvent: freshXml.includes('endEvent'),
-        hasUserTask: freshXml.includes('userTask'),
-        hasServiceTask: freshXml.includes('serviceTask'),
-        hasGateway: freshXml.includes('Gateway') || freshXml.includes('gateway'),
-        hasSequenceFlow: freshXml.includes('sequenceFlow'),
-        elementCount: (freshXml.match(/bpmn:/g) || []).length
-      });
       
       // Use the fresh XML for saving
       const savedXml = freshXml;
       setXml(savedXml);
       
       if (onSave) {
-        console.log('🔍 Calling onSave with fresh XML length:', savedXml.length);
         onSave(savedXml);
       }
       onDirtyChange(false);
@@ -669,6 +1278,56 @@ const BpmnModelerComponent: React.FC<BpmnModelerProps> = ({
       console.error('Error saving diagram:', err);
       setError(`Failed to save diagram: ${err.message}`);
       showToast(`Error saving diagram: ${err.message}`, 'error');
+    }
+  };
+
+  const handleSaveAndExecute = async () => {
+    if (!modelerRef.current) return;
+    try {
+      
+      // First save the diagram
+      const freshResult = await (modelerRef.current as any).saveXML({ format: true });
+      const freshXml = freshResult.xml || '';
+      
+      if (!freshXml || freshXml.length < 100) {
+        throw new Error('Invalid BPMN XML generated');
+      }
+      
+      setXml(freshXml);
+      
+      // Call onSave if provided
+      if (onSave) {
+        onSave(freshXml);
+      }
+      onDirtyChange(false);
+      
+      // Show saving toast
+      showToast('Workflow saved. Creating and executing workflow instance...', 'info');
+      
+      // Create and execute workflow
+      const workflowName = `Workflow_${new Date().toISOString().slice(0, 19).replace(/:/g, '-')}`;
+      const executionResult = await workflowApiService.createAndExecuteWorkflow({
+        bpmn_xml: freshXml,
+        workflow_name: workflowName,
+        workflow_description: 'Workflow created and executed from BPMN Modeler',
+        input_data: {},
+        created_by: 'user' // This should come from auth context
+      });
+      
+      showToast(`Workflow executed successfully! Instance ID: ${executionResult.instance.id}`, 'success');
+      
+      // Optionally navigate to the instance details page
+      if (typeof window !== 'undefined') {
+        setTimeout(() => {
+          window.open(`/instances/${executionResult.instance.id}`, '_blank');
+        }, 1000);
+      }
+      
+    } catch (err: any) {
+      console.error('Error saving and executing workflow:', err);
+      const errorMessage = err.message || 'Unknown error occurred';
+      setError(`Failed to save and execute workflow: ${errorMessage}`);
+      showToast(`Error: ${errorMessage}`, 'error');
     }
   };
 
@@ -695,13 +1354,11 @@ const BpmnModelerComponent: React.FC<BpmnModelerProps> = ({
     try {
       setIsLoading(true);
       setError('');
-      console.log('🆕 Creating new diagram via button...');
       
       const newXml = await createDiagramSafely(modelerRef.current);
       setXml(newXml);
       onDirtyChange(false);
       showToast('New diagram created successfully', 'success');
-      console.log('✅ New diagram created via button');
       
     } catch (err: any) {
       console.error('❌ Error creating new diagram via button:', err);
@@ -785,32 +1442,6 @@ const BpmnModelerComponent: React.FC<BpmnModelerProps> = ({
     const file = event.target.files?.[0];
     if (!file) return;
 
-    // Early debug - make sure we get here
-    console.log('🎯 FILE IMPORT STARTED');
-    (window as any).__debug_import_started = true;
-    
-    // Add basic debug helper immediately
-    (window as any).__debug_check = () => {
-      console.log('🔍 DEBUG CHECK:');
-      console.log('  - Import started:', (window as any).__debug_import_started);
-      console.log('  - Modeler ref:', modelerRef.current);
-      console.log('  - Container ref:', containerRef.current);
-      console.log('  - Properties panel ref:', propertiesPanelRef.current);
-      
-      if (modelerRef.current) {
-        try {
-          const canvas = modelerRef.current.get('canvas');
-          const elementRegistry = modelerRef.current.get('elementRegistry');
-          console.log('  - Canvas:', canvas);
-          console.log('  - Element registry:', elementRegistry);
-          console.log('  - All elements:', elementRegistry.getAll().map((el: BpmnElement) => ({ id: el.id, type: el.type })));
-        } catch (e) {
-          console.log('  - Error accessing modeler services:', e);
-        }
-      }
-    };
-    console.log('🛠️ Basic debug helper available: __debug_check()');
-
     setIsImporting(true);
     setIsManualImport(true);
     manualImportRef.current = true;
@@ -831,178 +1462,31 @@ const BpmnModelerComponent: React.FC<BpmnModelerProps> = ({
       console.log('Successfully loaded file content, length:', xmlContent.length);
 
       // Validate and normalize the BPMN XML
-      console.log('🔍 VALIDATING XML...');
-      const normalizedXml = validateAndNormalizeBpmnXml(xmlContent);
-      console.log('✅ XML VALIDATION PASSED');
+  const normalizedXml = ensureCamundaNamespace(validateAndNormalizeBpmnXml(xmlContent));
 
       // Import the XML directly into the modeler (like the working version)
       if (!modelerRef.current) {
         throw new Error('BPMN Modeler not initialized');
       }
 
-      console.log('🧹 STARTING MODELER CLEAR...');
       // Completely clear the modeler for override import
       await clearModelerForImport(modelerRef.current, 'file import');
-      console.log('✅ MODELER CLEARED');
       
-      // Try the working approach - recreate modeler if clearing fails
-      let currentModeler = modelerRef.current;
-      try {
-        console.log('📥 Importing XML directly (override mode)...');
-        console.log('📄 XML to import (first 500 chars):', normalizedXml.substring(0, 500));
-        
-        // Add debugging to global window for browser inspection
-        (window as any).__debug_bpmn_import = {
-          modeler: currentModeler,
-          xml: normalizedXml,
-          container: containerRef.current,
-          propertiesPanel: propertiesPanelRef.current
-        };
-        
-        await (currentModeler as any).importXML(normalizedXml);
-        console.log('BPMN XML imported successfully from file');
-        
-        // Detailed debugging after import
-        const canvas = currentModeler.get('canvas');
-        const elementRegistry = currentModeler.get('elementRegistry');
-        const rootElement = canvas.getRootElement();
-        
-        console.log('🔍 POST-IMPORT DEBUG:');
-        console.log('  - Root element:', rootElement);
-        console.log('  - Root element ID:', rootElement?.id);
-        console.log('  - Root element type:', rootElement?.type);
-        console.log('  - Canvas viewbox:', canvas.viewbox ? canvas.viewbox() : 'No viewbox');
-        console.log('  - Canvas zoom:', canvas.zoom ? canvas.zoom() : 'No zoom method');
-        
-        // Check DOM structure
-        const canvasContainer = canvas.getContainer();
-        const svgElement = canvasContainer?.querySelector('svg');
-        const gElements = canvasContainer?.querySelectorAll('g');
-        
-        console.log('🖼️ DOM STRUCTURE:');
-        console.log('  - Canvas container:', canvasContainer);
-        console.log('  - Canvas container HTML:', canvasContainer?.innerHTML?.substring(0, 200));
-        console.log('  - SVG element found:', !!svgElement);
-        console.log('  - SVG dimensions:', svgElement ? `${svgElement.getAttribute('width')}x${svgElement.getAttribute('height')}` : 'N/A');
-        console.log('  - Number of <g> elements:', gElements?.length || 0);
-        
-        // Check if elements are positioned correctly
-        const shapeElements = canvasContainer?.querySelectorAll('[data-element-id]');
-        console.log('  - Shape elements with data-element-id:', shapeElements?.length || 0);
-        
-        if (shapeElements && shapeElements.length > 0) {
-          Array.from(shapeElements).slice(0, 3).forEach((el, i) => {
-            console.log(`  - Shape ${i}:`, {
-              id: (el as Element).getAttribute('data-element-id'),
-              transform: (el as Element).getAttribute('transform'),
-              visibility: getComputedStyle(el as Element).visibility,
-              display: getComputedStyle(el as Element).display
-            });
-          });
-        }
-        
-        // Add debug info to global
-        (window as any).__debug_bpmn_post_import = {
-          canvas,
-          elementRegistry,
-          rootElement,
-          canvasContainer,
-          svgElement,
-          shapeElements: Array.from(shapeElements || [])
-        };
-        
-        // Add debug helpers to window for browser console
-        (window as any).__debug_bpmn_helpers = {
-          forceRedraw: () => {
-            console.log('🔄 Forcing canvas redraw...');
-            canvas.viewbox(canvas.viewbox());
-            canvas.resize();
-          },
-          zoomToFit: () => {
-            console.log('🔍 Zooming to fit...');
-            canvas.zoom('fit-viewport');
-          },
-          showElements: () => {
-            const elements = elementRegistry.getAll();
-            console.log('📊 All elements:', elements.map((el: BpmnElement) => ({ id: el.id, type: el.type, x: el.x, y: el.y, width: el.width, height: el.height })));
-          },
-          checkVisibility: () => {
-            const shapes = canvasContainer?.querySelectorAll('[data-element-id]');
-            console.log('👁️ Element visibility:');
-            Array.from(shapes || []).forEach(el => {
-              const style = getComputedStyle(el as Element);
-              console.log(`  ${(el as Element).getAttribute('data-element-id')}: visible=${style.visibility}, display=${style.display}, opacity=${style.opacity}`);
-            });
-          }
-        };
-        
-        console.log('🛠️ DEBUG HELPERS AVAILABLE:');
-        console.log('  __debug_bpmn_helpers.forceRedraw() - Force canvas redraw');
-        console.log('  __debug_bpmn_helpers.zoomToFit() - Zoom to fit viewport');
-        console.log('  __debug_bpmn_helpers.showElements() - Show all elements');
-        console.log('  __debug_bpmn_helpers.checkVisibility() - Check element visibility');
-      } catch (importError) {
-        console.warn('❌ DIRECT IMPORT FAILED, RECREATING MODELER:', importError);
-        
-        // Destroy current modeler and create new one (like working code)
-        currentModeler.destroy();
-        
-        // Create a fresh modeler
-        const newModeler = await initializeModelerSafely(
-          containerRef.current!,
-          propertiesPanelRef.current!,
-          showMinimap ? minimapRef.current : null,
-          [
-            BpmnPropertiesPanelModule,
-            BpmnPropertiesProviderModule,
-            CamundaPlatformPropertiesProviderModule,
-            ColorPickerModule,
-            ...(showMinimap ? [MinimapModule] : [])
-          ],
-          {
-            camunda: camundaModdleDescriptor
-          },
-          false
-        );
-        
-        if (!newModeler) {
-          throw new Error('Failed to recreate modeler instance');
-        }
-        
-        modelerRef.current = newModeler;
-        currentModeler = newModeler;
-        
-        // Now import with fresh modeler
-        await (currentModeler as any).importXML(normalizedXml);
-        console.log('BPMN XML imported successfully with recreated modeler');
-      }
+      // Import the XML directly
+      await (modelerRef.current as any).importXML(normalizedXml);
       
       // Force canvas refresh and ensure elements are visible
-      const canvas = currentModeler.get('canvas');
-      const elementRegistry = currentModeler.get('elementRegistry');
-      
-      // Log what was imported
-      const importedElements = elementRegistry.getAll();
-      console.log('📊 Imported elements count:', importedElements.length);
-      console.log('📊 Imported elements:', importedElements.map((el: any) => ({ id: el.id, type: el.type })));
+      const canvas = modelerRef.current.get('canvas');
+      const elementRegistry = modelerRef.current.get('elementRegistry');
       
       // Force canvas to refresh/redraw
       if (canvas.viewbox) {
         canvas.viewbox(canvas.viewbox());
-      }
-      
-      // Check canvas DOM content for file import
-      const canvasContainer = canvas.getContainer();
-      console.log('🖼️ File Import - Canvas container:', canvasContainer);
-      console.log('🖼️ File Import - Canvas container children:', canvasContainer?.children?.length || 0);
-      console.log('🖼️ File Import - Canvas SVG content:', canvasContainer?.querySelector('svg') ? 'Found SVG' : 'No SVG found');
-      
-      // Zoom to fit the viewport with delay to ensure DOM is ready
+      }      // Zoom to fit the viewport with delay to ensure DOM is ready
       setTimeout(async () => {
         try {
-          const canvas = currentModeler.get('canvas');
+          const canvas = modelerRef.current!.get('canvas');
           canvas.zoom('fit-viewport');
-          console.log('🔍 Viewport fitted after file import');
           
           // Force a redraw
           canvas.resize();
@@ -1016,12 +1500,12 @@ const BpmnModelerComponent: React.FC<BpmnModelerProps> = ({
       
       // Force properties panel refresh with delay
       setTimeout(() => {
-        const eventBus = currentModeler.get('eventBus');
+        const eventBus = modelerRef.current!.get('eventBus');
         eventBus.fire('selection.changed', { newSelection: [] });
       }, 100);
       
       // Update the XML state
-      const { xml: importedXml } = await (currentModeler as any).saveXML({ format: true });
+      const { xml: importedXml } = await (modelerRef.current as any).saveXML({ format: true });
       setXml(importedXml || '');
       
       // Clear error state and ensure clean display
@@ -1099,55 +1583,84 @@ const BpmnModelerComponent: React.FC<BpmnModelerProps> = ({
     setError('');
 
     try {
-      console.log('Attempting to import from URL:', importUrl);
-      
-      let xmlContent = '';
-      
-      // Try direct fetch first (for same-origin or CORS-enabled URLs)
-      try {
-        console.log('Trying direct fetch...');
-        const response = await fetch(importUrl, {
+  let xmlContent = '';
+  const isLocalRelative = importUrl.startsWith('/') && !importUrl.startsWith('//');
+
+      const doDirectFetch = async (): Promise<string> => {
+        const resp = await fetch(importUrl, {
           method: 'GET',
-          headers: {
-            'Accept': 'application/xml, text/xml, text/plain, */*',
-          },
-          mode: 'cors',
+          headers: { 'Accept': 'application/xml, text/xml, text/plain, */*' },
+          // mode 'cors' is fine; same-origin will ignore; remote may need proxy fallback
+          mode: 'cors'
         });
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}: ${resp.statusText}`);
+        return await resp.text();
+      };
 
-        if (!response.ok) {
-          throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      const doProxyFetch = async (): Promise<string> => {
+        const proxyUrl = `${IMPORT_PROXY_ROUTE}?url=${encodeURIComponent(importUrl)}`;
+        const proxyResp = await fetch(proxyUrl, {
+          method: 'GET',
+          headers: { 'Accept': 'application/xml, text/xml, text/plain, */*' }
+        });
+        if (!proxyResp.ok) {
+          // Try to parse JSON error from proxy
+            let details: any = undefined;
+            try { details = await proxyResp.json(); } catch (_) { /* ignore */ }
+            const proxyMsg = details?.error || proxyResp.statusText || 'Proxy fetch failed';
+            throw new Error(`Proxy error: ${proxyMsg}`);
         }
+        return await proxyResp.text();
+      };
 
-        xmlContent = await response.text();
-        console.log('Direct fetch successful');
-        
-      } catch (directFetchError) {
-        console.log('Direct fetch failed, trying proxy approach:', directFetchError);
-        
-        // Use our proxy API for CORS-blocked URLs
+      const classifyConnRefused = (err: unknown) => {
+        const msg = err instanceof Error ? (err.message || '') : String(err);
+        return /ECONNREFUSED|ENOTFOUND|ERR_CONNECTION_REFUSED|Failed to fetch/.test(msg);
+      };
+
+      // Execution order logic
+  const attemptDirectFirst = !IMPORT_PROXY_ONLY && !IMPORT_PROXY_FIRST; // default behavior
+  const attemptProxyFirst = IMPORT_PROXY_FIRST || IMPORT_PROXY_ONLY;
+
+      let directErr: any = null;
+      let proxyErr: any = null;
+
+      const tryDirect = async () => {
+        try { return await doDirectFetch(); } catch (e) { directErr = e; return undefined; }
+      };
+      const tryProxy = async () => {
+        try { return await doProxyFetch(); } catch (e) { proxyErr = e; return undefined; }
+      };
+
+      if (isLocalRelative) {
+        // Directly fetch from same origin static public folder, skip proxy entirely
         try {
-          const proxyUrl = `/api/proxy-bpmn?url=${encodeURIComponent(importUrl)}`;
-          console.log('Using proxy URL:', proxyUrl);
-          
-          const proxyResponse = await fetch(proxyUrl, {
-            method: 'GET',
-            headers: {
-              'Accept': 'application/xml, text/xml, text/plain, */*',
-            },
-          });
-
-          if (!proxyResponse.ok) {
-            const errorData = await proxyResponse.json().catch(() => ({ error: 'Unknown proxy error' }));
-            throw new Error(`Proxy error: ${errorData.error || proxyResponse.statusText}`);
-          }
-
-          xmlContent = await proxyResponse.text();
-          console.log('Proxy fetch successful');
-          
-        } catch (proxyError) {
-          console.error('Proxy fetch also failed:', proxyError);
-          throw new Error(`Unable to fetch BPMN file. ${proxyError instanceof Error ? proxyError.message : 'Please check the URL and ensure the server allows cross-origin requests.'}`);
+          xmlContent = await doDirectFetch();
+        } catch (e) {
+          throw new Error(`Local file fetch failed: ${(e as Error).message}`);
         }
+      } else if (attemptProxyFirst) {
+        const proxyResult = await tryProxy();
+        const directResult = !IMPORT_PROXY_ONLY && !proxyResult ? await tryDirect() : undefined;
+        xmlContent = proxyResult || directResult || '';
+      } else if (attemptDirectFirst) {
+        const directResult = await tryDirect();
+        const proxyResult = !directResult ? await tryProxy() : undefined;
+        xmlContent = directResult || proxyResult || '';
+      }
+
+      if (!xmlContent) {
+        // Build richer diagnostic
+        const messages: string[] = [];
+        if (directErr) messages.push(`Direct fetch failed: ${directErr instanceof Error ? directErr.message : directErr}`);
+        if (proxyErr) messages.push(`Proxy fetch failed: ${proxyErr instanceof Error ? proxyErr.message : proxyErr}`);
+
+        // Special hint for connection refused to localhost port
+        if (classifyConnRefused(directErr) || classifyConnRefused(proxyErr)) {
+          messages.push('Hint: Connection refused suggests no server is listening at the specified host/port (e.g., localhost:3080). Start a static server or use a reachable URL.');
+        }
+
+        throw new Error(messages.join(' | '));
       }
       
       if (!xmlContent || xmlContent.trim().length === 0) {
@@ -1159,10 +1672,8 @@ const BpmnModelerComponent: React.FC<BpmnModelerProps> = ({
         throw new Error('The URL did not return valid XML content');
       }
 
-      console.log('Successfully fetched XML content, length:', xmlContent.length);
-
       // Validate and normalize the BPMN XML
-      const normalizedXml = validateAndNormalizeBpmnXml(xmlContent);
+  const normalizedXml = ensureCamundaNamespace(validateAndNormalizeBpmnXml(xmlContent));
 
       // Import the XML directly into the modeler (like the working version)
       if (!modelerRef.current) {
@@ -1179,21 +1690,18 @@ const BpmnModelerComponent: React.FC<BpmnModelerProps> = ({
       window.__recent_manual_import = true;  // Additional protection
       
       // Import the XML directly (bypass safe import for override behavior)
-      console.log('📥 Importing XML directly (override mode)...');
-      await (modelerRef.current as any).importXML(normalizedXml);
-      console.log('BPMN XML imported successfully from URL');
+      let importSucceeded = false;
+      try {
+        await (modelerRef.current as any).importXML(normalizedXml);
+        importSucceeded = true;
+      } catch (impErr) {
+        console.error('❌ importXML failed:', impErr);
+        throw new Error(`BPMN parse/import failed: ${(impErr as Error).message || impErr}`);
+      }
       
       // Force canvas refresh and ensure elements are visible
       const canvas = modelerRef.current.get('canvas');
       const elementRegistry = modelerRef.current.get('elementRegistry');
-      
-      // Log what was imported
-      const importedElements = elementRegistry.getAll();
-      console.log('📊 Imported elements count:', importedElements.length);
-      console.log('📊 Imported elements:', importedElements.map((el: any) => ({ id: el.id, type: el.type })));
-      
-      // AGGRESSIVE RENDERING FIX - Force visibility and redraw
-      console.log('🎨 FORCING DIAGRAM VISIBILITY...');
       
       // 1. Force multiple redraws with delays
       const forceRedraw = async () => {
@@ -1263,8 +1771,6 @@ const BpmnModelerComponent: React.FC<BpmnModelerProps> = ({
         }, 100);
       }
       
-      console.log('✅ VISIBILITY FORCED - diagram should now be visible');
-      
       // Force canvas to refresh/redraw
       if (canvas.viewbox) {
         canvas.viewbox(canvas.viewbox());
@@ -1274,16 +1780,13 @@ const BpmnModelerComponent: React.FC<BpmnModelerProps> = ({
       setTimeout(async () => {
         try {
           const canvas = modelerRef.current!.get('canvas');
-          console.log('🎯 Starting viewport fitting...');
           
           canvas.zoom('fit-viewport');
-          console.log('🔍 Viewport fitted after URL import');
           
           // Force a canvas refresh (no resize method, use alternative)
           try {
             const eventBus = modelerRef.current!.get('eventBus');
             eventBus.fire('canvas.resized');
-            console.log('🎨 Canvas refresh triggered');
           } catch (e) {
             console.debug('Canvas refresh not available', e);
           }
@@ -1293,7 +1796,6 @@ const BpmnModelerComponent: React.FC<BpmnModelerProps> = ({
             setIsManualImport(false);
             manualImportRef.current = false;
             window.__recent_manual_import = false;  // Clear additional protection
-            console.log('🔄 Manual import flags cleared');
           }, 5000);  // Extended to 5 seconds
           
         } catch (e) {
@@ -1303,7 +1805,6 @@ const BpmnModelerComponent: React.FC<BpmnModelerProps> = ({
             setIsManualImport(false);
             manualImportRef.current = false;
             window.__recent_manual_import = false;  // Clear additional protection
-            console.log('🔄 Manual import flags cleared (after error)');
           }, 5000);  // Extended to 5 seconds
         }
       }, 500);
@@ -1317,13 +1818,50 @@ const BpmnModelerComponent: React.FC<BpmnModelerProps> = ({
         eventBus.fire('selection.changed', { newSelection: [] });
       }, 100);
       
-      // Update the XML state
-      const { xml: importedXml } = await (modelerRef.current as any).saveXML({ format: true });
-      setXml(importedXml || '');
-      
-      // Store in Redis and show success
-      await storeBpmnInRedis(normalizedXml, `imported_${Date.now()}.bpmn`);
-      showToast('BPMN diagram imported successfully!', 'success');
+      if (importSucceeded) {
+        // Update the XML state only if import actually succeeded
+        const { xml: importedXml } = await (modelerRef.current as any).saveXML({ format: true });
+        setXml(importedXml || '');
+
+        // Decide whether to attempt remote temp storage (skip for local static assets or if disabled)
+        const isLocalStaticRef = importUrl.startsWith('/') && !importUrl.startsWith('//');
+        let storageOutcome: any = null;
+        if (!isLocalStaticRef) {
+          storageOutcome = await storeBpmnInRedis(normalizedXml, `imported_${Date.now()}.bpmn`);
+        } else {
+          console.info('[Import] Skipping remote temp storage for local static path:', importUrl);
+        }
+
+        if (storageOutcome?.fallback) {
+          showToast('Imported (remote temp store offline, local session used).', 'info');
+        } else if (storageOutcome?.disabled) {
+          showToast('Imported (temp store disabled).', 'info');
+        } else if (isLocalRelative) {
+          showToast('BPMN diagram imported from local public path.', 'success');
+        } else if (storageOutcome === null) {
+          showToast('BPMN diagram imported (no storage attempted).', 'success');
+        } else {
+          showToast('BPMN diagram imported successfully!', 'success');
+        }
+
+        // Auto zoom fit again (ensures view) and auto select first meaningful element
+        try {
+          const canvas = modelerRef.current!.get('canvas');
+          canvas.zoom('fit-viewport');
+        } catch (e) { /* ignore */ }
+        try {
+          const elementRegistry = modelerRef.current!.get('elementRegistry');
+          const selectionSvc = modelerRef.current!.get('selection');
+          const all = elementRegistry.getAll();
+            const firstTask = all.find((el: any) => /Task$/.test(el.businessObject?.$type || '')) ||
+                              all.find((el: any) => el.type === 'bpmn:StartEvent' || el.type === 'bpmn:StartEvent');
+          if (firstTask) {
+            selectionSvc.select(firstTask);
+          }
+        } catch (e) {
+          console.debug('Auto-select failed', e);
+        }
+      }
       setShowImportDialog(false);
       setImportUrl('');
       onDirtyChange(false);
@@ -1331,22 +1869,27 @@ const BpmnModelerComponent: React.FC<BpmnModelerProps> = ({
     } catch (error) {
       console.error('Error importing BPMN from URL:', error);
       const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
-      
-      // Check if this is a file validity error or a system error
-      if (errorMessage.includes('no diagram to display') || 
-          errorMessage.includes('unparsable content') || 
-          errorMessage.includes('unknown type') ||
-          errorMessage.includes('Invalid BPMN') ||
-          errorMessage.includes('empty content') ||
-          errorMessage.includes('not return valid XML')) {
-        // File validity errors - keep dialog open for retry
+      const lower = errorMessage.toLowerCase();
+
+      // Connection refused specific guidance
+      const isConnRefused = /connrefused|connection refused|econnrefused|failed to fetch/.test(lower);
+      if (isConnRefused) {
+        const hint = 'Connection refused. Ensure a server is running at the URL (e.g. run: npx http-server -p 3080 .) or move the file into public/ and use a relative path (e.g. /bpmn/telecom-o2a-camunda.bpmn).';
+        showToast(hint, 'error');
+        setError(hint);
+      } else if (
+        lower.includes('no diagram to display') ||
+        lower.includes('unparsable content') ||
+        lower.includes('unknown type') ||
+        lower.includes('invalid bpmn') ||
+        lower.includes('empty content') ||
+        lower.includes('not return valid xml')
+      ) {
         showToast(`Invalid file: ${errorMessage}`, 'error');
         setError(`Please check your file and try again. ${errorMessage}`);
       } else {
-        // System errors - these are more serious
         showToast(`Import failed: ${errorMessage}`, 'error');
         setError(`Import failed: ${errorMessage}`);
-        // For system errors, close the dialog
         setShowImportDialog(false);
         setImportUrl('');
       }
@@ -1363,8 +1906,6 @@ const BpmnModelerComponent: React.FC<BpmnModelerProps> = ({
   const handleAutoImport = async (url: string, modelerInstance: BpmnModeler) => {
     if (!url.trim() || !modelerInstance) return;
 
-    console.log('🔗 Auto-importing BPMN from URL:', url);
-    
     try {
       // Validate URL format
       const validUrl = new URL(url.trim());
@@ -1395,13 +1936,11 @@ const BpmnModelerComponent: React.FC<BpmnModelerProps> = ({
         throw new Error('Response does not appear to be valid XML content');
       }
 
-      console.log('🔗 Auto-import: BPMN XML fetched successfully, importing safely...');
-      
-      // Use our safe import function
-      await importXmlSafely(modelerInstance, xmlData, 'auto-import');
-      setXml(xmlData);
-      
-      console.log('✅ Auto-import: BPMN imported successfully');
+  // Ensure camunda namespace
+  const xmlWithNs = ensureCamundaNamespace(xmlData);
+  // Use our safe import function
+  await importXmlSafely(modelerInstance, xmlWithNs, 'auto-import');
+  setXml(xmlWithNs);
       
     } catch (error) {
       console.error('❌ Error auto-importing BPMN from URL:', error);
@@ -1414,7 +1953,22 @@ const BpmnModelerComponent: React.FC<BpmnModelerProps> = ({
       {/* Header */}
       <div className="bg-white border-b px-6 py-4 flex justify-between items-center">
         <h2 className="text-xl font-semibold text-gray-900">FSM Process Designer</h2>
-        <div className="flex space-x-3">
+        <div className="flex items-center space-x-4">
+          {(!backendOnline || pendingSyncs.length > 0) && (
+            <div className="flex items-center space-x-2">
+              {!backendOnline && (
+                <span className="inline-flex items-center px-2 py-1 rounded-md text-xs font-medium bg-red-100 text-red-700 border border-red-300" title="Backend unreachable; storing diagrams locally until it returns">Offline Storage</span>
+              )}
+              {pendingSyncs.length > 0 && (
+                <button
+                  onClick={handleManualSync}
+                  className="inline-flex items-center px-2 py-1 rounded-md text-xs font-medium bg-yellow-100 text-yellow-800 border border-yellow-300 hover:bg-yellow-200"
+                  title="Manually try syncing queued diagrams"
+                >Sync {pendingSyncs.length}</button>
+              )}
+            </div>
+          )}
+          <div className="flex space-x-3">
           <button
             onClick={handleNewDiagram}
             className="bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded text-sm font-medium"
@@ -1425,16 +1979,16 @@ const BpmnModelerComponent: React.FC<BpmnModelerProps> = ({
           <button
             onClick={handleSave}
             className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded text-sm font-medium disabled:opacity-50"
-            disabled={isLoading || !isDirty}
+            disabled={isLoading || (!isDirty && !xml)}
           >
             Save
           </button>
           <button
-            onClick={handleExecuteWorkflow}
-            className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded text-sm font-medium"
-            disabled={isLoading || !xml}
+            onClick={handleSaveAndExecute}
+            className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded text-sm font-medium disabled:opacity-50"
+            disabled={isLoading || (!isDirty && !xml)}
           >
-            Execute Workflow
+            Save & Execute
           </button>
           <button
             onClick={handleToggleTransactionBoundaries}
@@ -1478,6 +2032,7 @@ const BpmnModelerComponent: React.FC<BpmnModelerProps> = ({
           >
             Close
           </button>
+          </div>
         </div>
       </div>
 
@@ -1513,6 +2068,33 @@ const BpmnModelerComponent: React.FC<BpmnModelerProps> = ({
         </div>
       )}
 
+      {/* Collapsible queued diagrams panel (enhanced) */}
+      {pendingSyncs.length > 0 && !queueCollapsed && (
+        <div className="fixed bottom-4 left-4 bg-white border border-gray-200 shadow-lg rounded-md p-3 w-72 z-40">
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-xs font-semibold text-gray-700">Queued Diagrams ({pendingSyncs.length})</span>
+            <div className="flex items-center space-x-2">
+              <button onClick={handleManualSync} className="text-xs text-blue-600 hover:underline">Sync Now</button>
+              <button onClick={() => setQueueCollapsed(true)} className="text-xs text-gray-500 hover:underline" title="Collapse">×</button>
+            </div>
+          </div>
+          <ul className="max-h-32 overflow-auto space-y-1">
+            {pendingSyncs.slice(-10).map(item => (
+              <li key={item.key} className="text-[10px] text-gray-600 truncate" title={item.filename}>{new Date(item.created).toLocaleTimeString()} • {item.filename}</li>
+            ))}
+          </ul>
+          <div className="mt-2 text-[10px] text-gray-400">
+            {backendOnline ? 'Backend online' : 'Waiting for backend...'}
+          </div>
+        </div>
+      )}
+      {pendingSyncs.length > 0 && queueCollapsed && (
+        <button
+          onClick={() => setQueueCollapsed(false)}
+          className="fixed bottom-4 left-4 bg-white border border-gray-300 shadow-md rounded-full px-3 py-2 text-xs font-medium text-gray-700 hover:bg-gray-50 z-40"
+          title="Expand queued diagrams panel"
+        >Queue ({pendingSyncs.length})</button>
+      )}
       {/* Toast Notifications */}
       {toast && (
         <div className={`fixed top-4 right-4 z-50 max-w-sm w-full ${
@@ -1557,6 +2139,46 @@ const BpmnModelerComponent: React.FC<BpmnModelerProps> = ({
                 ×
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Conflict Modal (Enhanced) */}
+  {conflictModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-40 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg shadow-xl max-w-3xl w-full mx-4 p-6">
+            <h3 className="text-lg font-semibold text-gray-900 mb-2">Conflict Detected</h3>
+            <p className="text-sm text-gray-600 mb-4">A remote temporary version of <span className="font-medium">{conflictModal.local.filename}</span> exists.</p>
+            {diffPreview && (
+               <div className="mb-4 p-3 bg-gray-50 rounded border text-xs text-gray-700 space-y-1">
+                 <div><span className="font-medium">Structural Diff:</span> {diffPreview.summary} • Local-only: {diffPreview.localOnly} • Remote-only: {diffPreview.remoteOnly}</div>
+                 { (diffPreview as any).assigneeFilledCount ? <div>Assignees adopted: {(diffPreview as any).assigneeFilledCount}</div> : null }
+                 { (diffPreview as any).candidateGroupsFilledCount ? <div>Candidate Groups adopted: {(diffPreview as any).candidateGroupsFilledCount}</div> : null }
+                 { (diffPreview as any).candidateUsersFilledCount ? <div>Candidate Users adopted: {(diffPreview as any).candidateUsersFilledCount}</div> : null }
+                 { (diffPreview as any).dueDateFilledCount ? <div>Due Dates adopted: {(diffPreview as any).dueDateFilledCount}</div> : null }
+                 { (diffPreview as any).extensionsImportedCount ? <div>Extensions imported: {(diffPreview as any).extensionsImportedCount}</div> : null }
+               </div>
+             )}
+            <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-4">
+              <button onClick={() => conflictModal.onResolve('skip')} className="px-3 py-2 rounded bg-gray-100 hover:bg-gray-200 text-gray-700 text-xs font-medium">Skip</button>
+              <button onClick={() => conflictModal.onResolve('overwrite')} className="px-3 py-2 rounded bg-red-600 hover:bg-red-700 text-white text-xs font-medium">Overwrite</button>
+              <button onClick={() => conflictModal.onResolve('merge')} className="px-3 py-2 rounded bg-blue-600 hover:bg-blue-700 text-white text-xs font-medium">Merge</button>
+              <button onClick={() => { const nf = prompt('New filename:', `copy_${Date.now()}_${conflictModal.local.filename}`); if (nf) (conflictModal.onResolve as any)('rename', { newFilename: nf }); }} className="px-3 py-2 rounded bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-medium">Rename</button>
+              <button onClick={() => conflictModal.onResolve('skip')} className="px-3 py-2 rounded bg-gray-50 hover:bg-gray-100 text-gray-500 text-xs font-medium">Close</button>
+            </div>
+            <details className="mb-3">
+              <summary className="cursor-pointer text-xs text-gray-700">Show Remote / Local Preview (truncated)</summary>
+              <div className="mt-2 grid grid-cols-1 md:grid-cols-2 gap-2 max-h-72 overflow-auto text-[10px] font-mono">
+                <div className="border rounded p-2 bg-white">
+                  <div className="font-semibold mb-1">Remote</div>
+                  <pre className="whitespace-pre-wrap">{(conflictModal.remote?.xml || '').slice(0, 2000)}</pre>
+                </div>
+                <div className="border rounded p-2 bg-white">
+                  <div className="font-semibold mb-1">Local</div>
+                  <pre className="whitespace-pre-wrap">{(conflictModal.local?.xml || '').slice(0, 2000)}</pre>
+                </div>
+              </div>
+            </details>
           </div>
         </div>
       )}
@@ -1684,6 +2306,7 @@ const BpmnModelerComponent: React.FC<BpmnModelerProps> = ({
           <div className="flex-1 overflow-auto">
             <div
               ref={propertiesPanelRef}
+              id="properties-panel"
               className="h-full properties-panel-container"
               style={{ minHeight: '300px', width: '100%' }}
             />

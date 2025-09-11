@@ -2,6 +2,9 @@ import type { Metadata } from "next";
 import { Inter } from "next/font/google";
 import "./globals.css";
 import { AuthProvider } from '../contexts/auth-context'
+import { Toaster } from '@/components/ui/toaster';
+import { OfflineProvider } from '@/context/OfflineContext';
+import OfflineBadge from '@/components/OfflineBadge';
 
 const inter = Inter({
   subsets: ["latin"],
@@ -24,7 +27,11 @@ export default function RootLayout({
         className={`${inter.variable} font-sans antialiased`}
       >
         <AuthProvider>
-          {children}
+          <OfflineProvider>
+            <OfflineBadge />
+            {children}
+            <Toaster />
+          </OfflineProvider>
         </AuthProvider>
       </body>
     </html>

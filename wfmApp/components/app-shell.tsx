@@ -19,7 +19,7 @@ import {
   SidebarSeparator,
   useSidebar,
 } from "@/components/ui/sidebar"
-import { Bell, CalendarDays, CheckSquare, LayoutDashboard, Settings, Users, Building2, BarChart3, Workflow, Package, Menu } from "lucide-react"
+import { Bell, CalendarDays, CheckSquare, LayoutDashboard, Settings, Users, Building2, BarChart3, Workflow, Package, Menu, Activity } from "lucide-react"
 import { cn } from "@/lib/utils"
 
 type NavItem = {
@@ -34,6 +34,7 @@ const navItems: NavItem[] = [
   { label: "Tasks", href: "/tasks", icon: CheckSquare },
   { label: "Calendar", href: "/calendar", icon: CalendarDays },
   { label: "Modelling", href: "/modelling", icon: Workflow },
+  { label: "Instances", href: "/instances", icon: Activity },
   { label: "Vendors", href: "/vendors", icon: Building2 },
   { label: "Reports", href: "/reports", icon: BarChart3 },
   { label: "Settings", href: "/settings", icon: Settings },

@@ -81,19 +81,36 @@ def test_end_to_end_flow(xml_file_path: str, xsd_dir: str = None):
         osm_mapper = OSMMapper()
         rules_data = osm_mapper.to_rules(json_data)
         
-        logger.info("4. Determining process from rules...")
+        logger.info("4. Evaluating order with rules engine...")
         from intServices.app.services.rules_client import RulesClient
-        rules_client = RulesClient()
-        process_definition = rules_client.determine_process(rules_data)
+        from intServices.app.core.config import settings
+        import asyncio
         
-        logger.info(f"5. Selected process: {process_definition.get('process_id')}")
+        # Enable stub mode for testing
+        settings.rules_api_stub = True
+        
+        # Create an async function to run the async code
+        async def evaluate_order():
+            rules_client = RulesClient()
+            evaluation_result = await rules_client.evaluate_order(rules_data)
+            return evaluation_result
+            
+        # Run the async function
+        evaluation_result = asyncio.run(evaluate_order())
+        
+        # Get the process ID from the evaluation result
+        process_id = evaluation_result.get('process_id')
+        if not process_id:
+            raise ValueError("No process_id returned from rules evaluation")
+            
+        logger.info(f"5. Selected process: {process_id}")
         
         # 6. Start BPMN process
         logger.info("6. Starting BPMN process...")
         from intServices.app.services.process_client import ProcessClient
         process_client = ProcessClient()
         process_instance = process_client.start_process(
-            process_definition['process_id'],
+            process_id,
             variables=rules_data
         )
         

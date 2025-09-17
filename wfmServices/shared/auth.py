@@ -216,6 +216,40 @@ async def get_current_user(
 ) -> TokenData:
     """Get current user from token."""
     token = credentials.credentials
+    
+    # Log the token for debugging (redact most of it for security)
+    token_prefix = token[:10] + '...' + token[-10:] if len(token) > 20 else token
+    logger.info(f"Processing token: {token_prefix}")
+    
+    # In development mode, check if the token is a mock token and extract tenant_id if provided
+    if settings.service.environment == "development" and token.startswith("mock-jwt-token-for-development"):
+        logger.info("Processing mock token for development")
+        
+        # Default tenant_id if not provided in the token
+        tenant_id = "test-tenant"
+        
+        # Format: "mock-jwt-token-for-development-{tenant_id}"
+        if "-" in token:
+            parts = token.split("-")
+            if len(parts) > 4 and parts[-1]:
+                tenant_id = parts[-1]
+        
+        logger.info(f"Using tenant_id from mock token: {tenant_id}")
+        
+        # Create a token data object with the tenant_id
+        token_data = TokenData(
+            user_id="mock-user-id",
+            username="testuser",
+            tenant_id=tenant_id,
+            roles=["admin"],
+            exp=datetime.utcnow() + timedelta(days=1)
+        )
+        
+        logger.info(f"Created mock token data: {token_data}")
+        return token_data
+    
+    # For non-mock tokens, use the token manager to verify the token
+    logger.info("Processing regular JWT token")
     return token_manager.verify_token(token)
 
 

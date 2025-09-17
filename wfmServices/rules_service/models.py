@@ -55,8 +55,9 @@ class Rule(BaseEntity):
 class RuleEvaluationRequest(BaseModel):
     """Rule evaluation request model."""
     data: Dict[str, Any] = Field(..., description="Input data for rule evaluation")
-    rule_ids: Optional[List[str]] = None  # Specific rules to evaluate
-    category: Optional[str] = None  # Evaluate rules by category
+    rule_ids: Optional[List[str]] = None
+    category: Optional[str] = None
+    tenant_id: Optional[str] = Field(None, description="Tenant ID for the rule evaluation")
     orchestrate: bool = Field(default=False, description="Whether to orchestrate downstream job creation")
     split_jobs: bool = Field(default=False, description="When orchestrating, create a job per item if possible")
     auto_schedule: bool = Field(default=True, description="Schedule jobs immediately after creation")

@@ -139,16 +139,133 @@ class RulesRepository:
             logger.error(f"Failed to get rules by category {category}: {str(e)}")
             return []
     
+    async def get_all_rules(self, tenant_id: str) -> List[Dict[str, Any]]:
+        """Get all rules for tenant, regardless of status."""
+        try:
+            logger.info(f"Getting all rules for tenant: {tenant_id}")
+            
+            # Log the collection name and connection status
+            logger.info(f"Using collection: {self.collection.name}")
+            
+            # Log the query being executed
+            query = {"tenant_id": tenant_id}
+            logger.info(f"Executing query: {query}")
+            
+            # Get the count of matching documents
+            count = await self.collection.count_documents(query)
+            logger.info(f"Found {count} total rules for tenant {tenant_id}")
+            
+            # Execute the query
+            cursor = self.collection.find(query)
+            rules = await cursor.to_list(length=1000)
+            
+            # Log the number of rules found
+            logger.info(f"Retrieved {len(rules)} total rules for tenant {tenant_id}")
+            
+            # Log the first few rules for debugging
+            for i, rule in enumerate(rules[:5], 1):
+                logger.info(f"Rule {i}: ID={rule.get('_id')}, Name='{rule.get('name')}', "
+                           f"Status='{rule.get('status')}', Category='{rule.get('category')}', "
+                           f"Tenant='{rule.get('tenant_id')}'")
+            
+            # Convert ObjectId to string
+            result = [self._convert_id(rule) for rule in rules]
+            return result
+            
+        except Exception as e:
+            logger.error(f"Failed to get all rules for tenant {tenant_id}: {str(e)}", exc_info=True)
+            return []
+            
     async def get_active_rules(self, tenant_id: str) -> List[Dict[str, Any]]:
         """Get all active rules for tenant."""
         try:
-            cursor = self.collection.find({
+            logger.info(f"[REPOSITORY] Getting active rules for tenant: {tenant_id}")
+            
+            # Ensure tenant_id is not None or empty
+            if not tenant_id or tenant_id == "default":
+                tenant_id = "test-tenant"
+                logger.warning(f"[REPOSITORY] No tenant_id provided or using default, using: {tenant_id}")
+            
+            # Log the collection name and connection status
+            if not hasattr(self, 'collection'):
+                logger.error("[REPOSITORY] Collection not initialized in rules repository")
+                return []
+                
+            logger.info(f"[REPOSITORY] Using collection: {self.collection.name}")
+            
+            # Log database stats for debugging
+            try:
+                db_stats = await self.database.command('dbstats')
+                logger.info(f"[REPOSITORY] Database stats: {db_stats}")
+                
+                # List all collections in the database
+                collections = await self.database.list_collection_names()
+                logger.info(f"[REPOSITORY] Available collections: {collections}")
+                
+                # Get count of all rules in the collection (for debugging)
+                total_rules = await self.collection.count_documents({})
+                logger.info(f"[REPOSITORY] Total rules in collection: {total_rules}")
+                
+                # Get count of rules for this tenant (regardless of status)
+                tenant_rule_count = await self.collection.count_documents({"tenant_id": tenant_id})
+                logger.info(f"[REPOSITORY] Total rules for tenant {tenant_id}: {tenant_rule_count}")
+                
+            except Exception as e:
+                logger.error(f"[REPOSITORY] Error getting database stats: {str(e)}")
+            
+            # Log the query being executed
+            query = {
                 "tenant_id": tenant_id,
                 "status": "active"
-            })
+            }
+            logger.info(f"[REPOSITORY] Executing query: {query}")
             
-            rules = await cursor.to_list(length=1000)
-            return [self._convert_id(rule) for rule in rules]
+            try:
+                # Get the count of matching documents
+                count = await self.collection.count_documents(query)
+                logger.info(f"[REPOSITORY] Found {count} active rules for tenant {tenant_id}")
+                
+                # Execute the query
+                cursor = self.collection.find(query)
+                rules = await cursor.to_list(length=1000)
+                
+                # Log the number of rules found
+                logger.info(f"[REPOSITORY] Retrieved {len(rules)} active rules for tenant {tenant_id}")
+                
+                # Log the first few rules for debugging
+                for i, rule in enumerate(rules[:3], 1):
+                    logger.info(f"[REPOSITORY] Rule {i}: ID={rule.get('_id')}, "
+                               f"Name='{rule.get('name')}', "
+                               f"Status='{rule.get('status')}', "
+                               f"Category='{rule.get('category')}', "
+                               f"Tenant='{rule.get('tenant_id')}'")
+                
+                # If no rules found, try to find out why
+                if not rules:
+                    logger.warning(f"[REPOSITORY] No active rules found for tenant {tenant_id}")
+                    
+                    # Check if collection is empty
+                    total_count = await self.collection.count_documents({})
+                    logger.info(f"[REPOSITORY] Total rules in collection: {total_count}")
+                    
+                    # Check if there are any rules for this tenant (regardless of status)
+                    tenant_rules_count = await self.collection.count_documents({"tenant_id": tenant_id})
+                    logger.info(f"[REPOSITORY] Total rules for tenant {tenant_id}: {tenant_rules_count}")
+                    
+                    # Get a sample of rules to see what tenant_ids exist
+                    sample = await self.collection.find({}).limit(5).to_list(length=5)
+                    for i, rule in enumerate(sample, 1):
+                        logger.info(f"[REPOSITORY] Sample rule {i}: Tenant='{rule.get('tenant_id')}', "
+                                   f"Status='{rule.get('status')}', Name='{rule.get('name')}'")
+                
+                # Convert ObjectId to string
+                result = [self._convert_id(rule) for rule in rules]
+                return result
+                
+            except Exception as query_error:
+                logger.error(f"[REPOSITORY] Query execution failed: {str(query_error)}", exc_info=True)
+                return []
+            
         except Exception as e:
-            logger.error(f"Failed to get active rules for tenant {tenant_id}: {str(e)}")
+            logger.error(f"[REPOSITORY] Failed to get active rules for tenant {tenant_id}: {str(e)}", exc_info=True)
             return [] 

@@ -39,11 +39,15 @@ class OSMXMLToRulesMapper(Mapper):
         if xsd_dir and os.path.isdir(xsd_dir):
             logger.info(f"Initializing XML mapper with XSD directory: {xsd_dir}")
             self.xml_parser = XMLToJSONParser(xsd_dir=xsd_dir)
-            self.xml_mapper = OSMXMLMapper(xml_parser=self.xml_parser)
+            self.xml_mapper = OSMXMLMapper()
+            # Override the parser in the mapper with our configured one
+            self.xml_mapper.parser = self.xml_parser
         else:
             logger.warning("No valid XSD directory provided, XSD validation will be disabled")
             self.xml_parser = XMLToJSONParser()
-            self.xml_mapper = OSMXMLMapper(xml_parser=self.xml_parser)
+            self.xml_mapper = OSMXMLMapper()
+            # Override the parser in the mapper with our configured one
+            self.xml_mapper.parser = self.xml_parser
     
     def to_rules(self, payload: Dict[str, Any], validate_xsd: bool = False, 
                  schema_name: Optional[str] = None) -> Dict[str, Any]:
@@ -69,18 +73,20 @@ class OSMXMLToRulesMapper(Mapper):
             if isinstance(payload, dict) and 'xml_content' in payload:
                 # Handle XML content wrapped in dictionary
                 xml_content = payload['xml_content']
-                json_payload = self.xml_mapper.xml_to_json(
-                    xml_content, 
-                    validate_xsd=validate_xsd,
-                    schema_name=schema_name
-                )
+                # Validate with XSD if requested
+                if validate_xsd and schema_name:
+                    is_valid, message = self.xml_parser.validate_with_xsd(xml_content, schema_name)
+                    if not is_valid:
+                        raise XMLParseError(f"XSD validation failed: {message}")
+                json_payload = self.xml_mapper.xml_to_json(xml_content)
             elif isinstance(payload, str):
                 # Handle raw XML string
-                json_payload = self.xml_mapper.xml_to_json(
-                    payload,
-                    validate_xsd=validate_xsd,
-                    schema_name=schema_name
-                )
+                # Validate with XSD if requested
+                if validate_xsd and schema_name:
+                    is_valid, message = self.xml_parser.validate_with_xsd(payload, schema_name)
+                    if not is_valid:
+                        raise XMLParseError(f"XSD validation failed: {message}")
+                json_payload = self.xml_mapper.xml_to_json(payload)
             elif isinstance(payload, dict):
                 # Handle existing JSON format (backward compatibility)
                 json_payload = payload

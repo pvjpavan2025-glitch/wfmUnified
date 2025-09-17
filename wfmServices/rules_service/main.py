@@ -2,6 +2,7 @@
 Rules Engine Service main application.
 """
 import os
+import json
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, status, Depends
 from fastapi.middleware.cors import CORSMiddleware
@@ -18,6 +19,20 @@ import httpx
 
 # Setup logging
 logger = setup_logging("rules-service")
+
+# Ensure debug logs are captured
+import logging
+logging.basicConfig(
+    level=logging.DEBUG,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler(),
+        logging.FileHandler('/app/app.log')
+    ]
+)
+
+# Set log level for our application
+logger.setLevel(logging.DEBUG)
 
 
 @asynccontextmanager
@@ -168,9 +183,48 @@ async def evaluate_rules(
 ):
     """Evaluate rules against input data."""
     try:
+        # Log the start of the evaluation
+        logger.info("\n" + "=" * 80)
+        logger.info("===== RULES EVALUATION REQUEST RECEIVED =====")
+        
+        # Log the full evaluation request for debugging
+        logger.info(f"[DEBUG] Full evaluation request: {evaluation_request.dict()}")
+        
+        # Always use tenant_id from the request body if provided, otherwise use the one from the token
+        tenant_id = evaluation_request.tenant_id if evaluation_request.tenant_id else current_user.tenant_id
+        
+        # If tenant_id is still None or 'default', use 'test-tenant' as a fallback
+        if not tenant_id or tenant_id == "default":
+            tenant_id = "test-tenant"
+            logger.warning(f"Using fallback tenant_id: {tenant_id}")
+        
+        # Log the tenant_id being used for evaluation
+        logger.info(f"[TENANT_ID] Request tenant_id: {evaluation_request.tenant_id}")
+        logger.info(f"[TENANT_ID] Token tenant_id: {current_user.tenant_id}")
+        logger.info(f"[TENANT_ID] Final tenant_id being used: {tenant_id}")
+        
+        # Log the category being used for evaluation
+        logger.info(f"[CATEGORY] Evaluation category: {evaluation_request.category}")
+        
+        # Log the data being evaluated
+        logger.info(f"[DATA] Evaluation data: {json.dumps(evaluation_request.data, indent=2) if hasattr(evaluation_request, 'data') else 'No data'}")
+        
+        # Log the evaluation options
+        logger.info(f"[OPTIONS] Orchestrate: {getattr(evaluation_request, 'orchestrate', False)}")
+        logger.info(f"[OPTIONS] Auto Schedule: {getattr(evaluation_request, 'auto_schedule', False)}")
+        
+        # Log the evaluation request details
+        logger.info(f"[EVAL_REQUEST] Evaluation request: {evaluation_request.dict()}")
+        
+        # Ensure the tenant_id is set in the evaluation request
+        evaluation_request.tenant_id = tenant_id
+        
+        # Log the final evaluation request with tenant_id
+        logger.info(f"[EVAL_REQUEST] Updated evaluation request: {evaluation_request.dict()}")
+        
         result = await rules_service.evaluate_rules(
             evaluation_request.data,
-            current_user.tenant_id,
+            tenant_id,  # Pass the resolved tenant_id
             rule_ids=evaluation_request.rule_ids,
             category=evaluation_request.category,
             orchestrate=evaluation_request.orchestrate,
@@ -179,10 +233,10 @@ async def evaluate_rules(
         )
         return result
     except Exception as e:
-        logger.error(f"Rule evaluation failed: {str(e)}")
+        logger.error(f"Rule evaluation failed: {str(e)}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Rule evaluation failed"
+            detail=f"Rule evaluation failed: {str(e)}"
         )
 
 

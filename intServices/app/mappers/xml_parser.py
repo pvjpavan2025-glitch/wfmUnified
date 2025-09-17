@@ -111,7 +111,11 @@ class XMLToJSONParser:
             
             # Parse XML
             root = ET.fromstring(xml_content)
-            return self._element_to_dict(root)
+            root_dict = self._element_to_dict(root)
+        
+            # Preserve root element name as key
+            root_name = self._to_snake_case(root.tag)
+            return {root_name: root_dict}
         except ET.ParseError as e:
             raise XMLParseError(f"Failed to parse XML: {str(e)}")
         except Exception as e:
@@ -163,7 +167,7 @@ class XMLToJSONParser:
         
         result.update(children_dict)
         
-        return result if result else None
+        return result if result else {}
     
     def _handle_osm_structures(self, data: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -307,7 +311,8 @@ class OSMXMLMapper:
         result = {
             "externalId": data.get("external_id"),
             "priority": self._safe_int(data.get("priority"), 5),
-            "category": data.get("category"),
+            "orderType": data.get("category"),  # Map category to orderType for rule compatibility
+            "category": data.get("category"),   # Keep category for backward compatibility
             "orderDate": data.get("order_date"),
             "requestedCompletionDate": data.get("requested_completion_date"),
             "description": data.get("description"),

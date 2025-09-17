@@ -15,6 +15,7 @@ class OSMMapper(Mapper):
         rules_payload = {
             "externalId": payload.get("externalId"),
             "priority": payload.get("priority"),
+            "orderType": payload.get("orderType", payload.get("category")),  # Map orderType for rule compatibility
             "category": payload.get("category"),
             "orderDate": payload.get("orderDate"),
             "requestedCompletionDate": payload.get("requestedCompletionDate"),

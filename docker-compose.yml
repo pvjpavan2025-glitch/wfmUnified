@@ -398,6 +398,51 @@ services:
       redis:
         condition: service_healthy
 
+  # INTEGRATION SERVICES LAYER - Start after backend services
+  integration-service:
+    build:
+      context: ./intServices
+      dockerfile: Dockerfile
+    container_name: wfm_integration_service
+    environment:
+      - ENV=dev
+      - PORT=8082
+      - DATABASE_URL=postgresql+asyncpg://workflow_user:workflow_pass@wfm-postgres:5432/workflow
+      - RULES_API_BASE_URL=http://wfm_rules_service:8003
+      - SCHEDULER_API_BASE_URL=http://wfm_scheduler_service:8004
+      - ORDER_API_BASE_URL=http://wfm_order_service:8008
+      - API_KEY=change-me-please
+      - JWT_SECRET=your-super-secret-key-change-in-production
+      - RULES_JWT_SECRET=your-super-secret-key-change-in-production
+      - RULES_TENANT_ID=test-tenant
+      - INTSERVICES_SKIP_DB_INIT=true
+    volumes:
+      - ./intServices:/app
+      - /app/__pycache__
+    ports:
+      - "8082:8082"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      mongodb:
+        condition: service_healthy
+      rules-service:
+        condition: service_started
+      scheduler-service:
+        condition: service_started
+      order-service:
+        condition: service_started
+    networks:
+      - wfm-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import requests; requests.get('http://localhost:8082/healthz')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
   # 3. BPMN PROCESS ENGINE LAYER - Start after backend services
   wfmprocess-backend:
     build:

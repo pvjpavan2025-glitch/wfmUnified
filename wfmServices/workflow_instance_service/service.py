@@ -6,7 +6,8 @@ import json
 import asyncio
 from datetime import datetime
 from typing import List, Optional, Dict, Any
-from fastapi import HTTPException
+from fastapi import HTTPException, Depends
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from .models import (
     WorkflowInstance,
@@ -21,13 +22,14 @@ from .models import (
     WorkflowExecutionResponse
 )
 from .repository import WorkflowInstanceRepository
+from shared.sql_database import get_db_session
 
 
 class WorkflowInstanceService:
     """Service for workflow instance business logic."""
     
-    def __init__(self):
-        self.repository = WorkflowInstanceRepository()
+    def __init__(self, db_session: AsyncSession = Depends(get_db_session)):
+        self.repository = WorkflowInstanceRepository(db_session=db_session)
         self.spiff_workflow_url = "http://localhost:8002"  # wfmProcess service URL
     
     async def create_workflow_instance(

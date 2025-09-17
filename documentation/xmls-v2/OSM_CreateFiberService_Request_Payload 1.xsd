@@ -1,0 +1,149 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema" elementFormDefault="qualified">
+
+  <xs:element name="ServiceOrderInstallationRequest">
+    <xs:complexType>
+      <xs:sequence>
+        <xs:element name="id" type="xs:string"/>
+        <xs:element name="href" type="xs:string" minOccurs="0"/>
+        <xs:element name="externalId" type="xs:string" minOccurs="0"/>
+        <xs:element name="priority" type="xs:string" minOccurs="0"/>
+        <xs:element name="category" type="xs:string"/>
+        <xs:element name="state" type="xs:string" minOccurs="0"/>
+        <xs:element name="orderDate" type="xs:dateTime"/>
+        <xs:element name="requestedCompletionDate" type="xs:dateTime" minOccurs="0"/>
+        <xs:element name="description" type="xs:string"/>
+
+        <!-- relatedParty -->
+        <xs:element name="relatedParty">
+          <xs:complexType>
+            <xs:sequence>
+              <xs:element name="item" maxOccurs="unbounded">
+                <xs:complexType>
+                  <xs:sequence>
+                    <xs:element name="id" type="xs:string"/>
+                    <xs:element name="role" type="xs:string"/>
+                    <xs:element name="name" type="xs:string"/>
+                    <xs:element name="attr_referredType" type="xs:string" minOccurs="0"/>
+                  </xs:sequence>
+                </xs:complexType>
+              </xs:element>
+            </xs:sequence>
+          </xs:complexType>
+        </xs:element>
+
+        <!-- serviceOrderItem -->
+        <xs:element name="serviceOrderItem">
+          <xs:complexType>
+            <xs:sequence>
+              <xs:element name="item" maxOccurs="unbounded">
+                <xs:complexType>
+                  <xs:sequence>
+                    <xs:element name="id" type="xs:string" minOccurs="0"/>
+                    <xs:element name="action" type="xs:string" minOccurs="0"/>
+                    <xs:element name="service">
+                      <xs:complexType>
+                        <xs:sequence>
+                          <xs:element name="id" type="xs:string"/>
+                          <xs:element name="category" type="xs:string"/>
+                          <xs:element name="serviceType" type="xs:string"/>
+                          <xs:element name="serviceSpecification">
+                            <xs:complexType>
+                              <xs:sequence>
+                                <xs:element name="id" type="xs:string" minOccurs="0"/>
+                                <xs:element name="name" type="xs:string"/>
+                                <xs:element name="version" type="xs:string"/>
+                              </xs:sequence>
+                            </xs:complexType>
+                          </xs:element>
+                          <xs:element name="serviceCharacteristic">
+                            <xs:complexType>
+                              <xs:sequence>
+                                <xs:element name="item" maxOccurs="unbounded">
+                                  <xs:complexType>
+                                    <xs:sequence>
+                                      <xs:element name="name" type="xs:string"/>
+                                      <xs:element name="value" type="xs:string"/>
+                                      <xs:element name="valueType" type="xs:string"/>
+                                    </xs:sequence>
+                                  </xs:complexType>
+                                </xs:element>
+                              </xs:sequence>
+                            </xs:complexType>
+                          </xs:element>
+                          <xs:element name="place">
+                            <xs:complexType>
+                              <xs:sequence>
+                                <xs:element name="item" maxOccurs="unbounded">
+                                  <xs:complexType>
+                                    <xs:sequence>
+                                      <xs:element name="id" type="xs:string" minOccurs="0"/>
+                                      <xs:element name="role" type="xs:string"/>
+                                      <xs:element name="attr_type" type="xs:string"/>
+                                      <xs:element name="street" type="xs:string"/>
+                                      <xs:element name="city" type="xs:string"/>
+                                      <xs:element name="postalCode" type="xs:string"/>
+                                      <xs:element name="country" type="xs:string"/>
+                                      <xs:element name="geographicLocation">
+                                        <xs:complexType>
+                                          <xs:sequence>
+                                            <xs:element name="latitude" type="xs:string"/>
+                                            <xs:element name="longitude" type="xs:string"/>
+                                          </xs:sequence>
+                                        </xs:complexType>
+                                      </xs:element>
+                                    </xs:sequence>
+                                  </xs:complexType>
+                                </xs:element>
+                              </xs:sequence>
+                            </xs:complexType>
+                          </xs:element>
+                        </xs:sequence>
+                      </xs:complexType>
+                    </xs:element>
+                  </xs:sequence>
+                </xs:complexType>
+              </xs:element>
+            </xs:sequence>
+          </xs:complexType>
+        </xs:element>
+
+        <!-- note -->
+        <xs:element name="note">
+          <xs:complexType>
+            <xs:sequence>
+              <xs:element name="item" maxOccurs="unbounded">
+                <xs:complexType>
+                  <xs:sequence>
+                    <xs:element name="text" type="xs:string"/>
+                    <xs:element name="date" type="xs:dateTime"/>
+                    <xs:element name="author" type="xs:string"/>
+                  </xs:sequence>
+                </xs:complexType>
+              </xs:element>
+            </xs:sequence>
+          </xs:complexType>
+        </xs:element>
+
+        <!-- orderRelationship (commented in XML but kept optional here) -->
+        <xs:element name="orderRelationship" minOccurs="0">
+          <xs:complexType>
+            <xs:sequence>
+              <xs:element name="item" maxOccurs="unbounded">
+                <xs:complexType>
+                  <xs:sequence>
+                    <xs:element name="id" type="xs:string"/>
+                    <xs:element name="relationshipType" type="xs:string"/>
+                    <xs:element name="href" type="xs:string"/>
+                  </xs:sequence>
+                </xs:complexType>
+              </xs:element>
+            </xs:sequence>
+          </xs:complexType>
+        </xs:element>
+
+      </xs:sequence>
+    </xs:complexType>
+  </xs:element>
+
+</xs:schema>

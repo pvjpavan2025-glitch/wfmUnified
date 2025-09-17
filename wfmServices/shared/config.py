@@ -8,13 +8,24 @@ from pydantic import Field
 
 class DatabaseSettings(BaseSettings):
     """Database configuration settings."""
+    # MongoDB settings
     mongodb_url: str = Field(default="mongodb://localhost:27017", env="MONGODB_URL")
-    redis_url: str = Field(default="redis://localhost:6379", env="REDIS_URL")
     database_name: str = Field(default="wfm", env="DATABASE_NAME")
     # TLS/SSL settings
     mongodb_tls: bool = Field(default=True, env="MONGODB_TLS")
     mongodb_tls_allow_invalid_certificates: bool = Field(default=False, env="MONGODB_TLS_ALLOW_INVALID_CERTIFICATES")
     mongodb_tls_ca_file: str = Field(default="/etc/ssl/certs/ca-certificates.crt", env="MONGODB_TLS_CA_FILE")
+    
+    # Redis settings
+    redis_url: str = Field(default="redis://localhost:6379", env="REDIS_URL")
+    
+    # PostgreSQL settings
+    postgres_user: str = Field(default="workflow_user", env="POSTGRES_USER")
+    postgres_password: str = Field(default="workflow_pass", env="POSTGRES_PASSWORD")
+    postgres_host: str = Field(default="localhost", env="POSTGRES_HOST")
+    postgres_port: str = Field(default="5432", env="POSTGRES_PORT")
+    postgres_db: str = Field(default="workflow", env="POSTGRES_DB")
+    sql_database_url: Optional[str] = Field(default=None, env="POSTGRESQL_URL")
 
 
 class SecuritySettings(BaseSettings):

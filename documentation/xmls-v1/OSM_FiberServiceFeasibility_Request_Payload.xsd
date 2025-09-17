@@ -1,0 +1,123 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema" elementFormDefault="qualified">
+  <xs:element name="ServiceOrderFeasibilityRequest">
+    <xs:complexType>
+      <xs:sequence>
+        <xs:element name="id" type="xsd:string" minOccurs="0" maxOccurs="1"/>
+        <xs:element name="href" type="xsd:string" minOccurs="0" maxOccurs="1"/>
+        <xs:element name="externalId" type="xsd:string" minOccurs="0" maxOccurs="1"/>
+        <xs:element name="priority" type="xsd:string" minOccurs="0" maxOccurs="1"/>
+        <xs:element name="category" type="xsd:string" minOccurs="0" maxOccurs="1"/>
+        <xs:element name="state" type="xsd:string" minOccurs="0" maxOccurs="1"/>
+        <xs:element name="orderDate" type="xsd:string" minOccurs="0" maxOccurs="1"/>
+        <xs:element name="requestedCompletionDate" type="xsd:string" minOccurs="0" maxOccurs="1"/>
+        <xs:element name="description" type="xsd:string" minOccurs="0" maxOccurs="1"/>
+        <xs:element name="relatedParty" minOccurs="0" maxOccurs="1">
+          <xs:complexType>
+            <xs:sequence>
+              <xs:element name="item" minOccurs="0" maxOccurs="unbounded">
+                <xs:complexType>
+                  <xs:sequence>
+                    <xs:element name="id" type="xsd:string" minOccurs="0" maxOccurs="1"/>
+                    <xs:element name="role" type="xsd:string" minOccurs="0" maxOccurs="1"/>
+                    <xs:element name="name" type="xsd:string" minOccurs="0" maxOccurs="1"/>
+                    <xs:element name="attr_referredType" type="xsd:string" minOccurs="0" maxOccurs="1"/>
+                  </xs:sequence>
+                </xs:complexType>
+              </xs:element>
+            </xs:sequence>
+          </xs:complexType>
+        </xs:element>
+        <xs:element name="serviceOrderItem" minOccurs="0" maxOccurs="1">
+          <xs:complexType>
+            <xs:sequence>
+              <xs:element name="item" minOccurs="0" maxOccurs="unbounded">
+                <xs:complexType>
+                  <xs:sequence>
+                    <xs:element name="id" type="xsd:string" minOccurs="0" maxOccurs="1"/>
+                    <xs:element name="action" type="xsd:string" minOccurs="0" maxOccurs="1"/>
+                    <xs:element name="service">
+                      <xs:complexType>
+                        <xs:sequence>
+                          <xs:element name="id" type="xsd:string" minOccurs="0" maxOccurs="1"/>
+                          <xs:element name="category" type="xsd:string" minOccurs="0" maxOccurs="1"/>
+                          <xs:element name="serviceType" type="xsd:string" minOccurs="0" maxOccurs="1"/>
+                          <xs:element name="serviceSpecification" minOccurs="0" maxOccurs="1">
+                            <xs:complexType>
+                              <xs:sequence>
+                                <xs:element name="id" type="xsd:string" minOccurs="0" maxOccurs="1"/>
+                                <xs:element name="name" type="xsd:string" minOccurs="0" maxOccurs="1"/>
+                                <xs:element name="version" type="xsd:string" minOccurs="0" maxOccurs="1"/>
+                              </xs:sequence>
+                            </xs:complexType>
+                          </xs:element>
+                          <xs:element name="serviceCharacteristic" minOccurs="0" maxOccurs="1">
+                            <xs:complexType>
+                              <xs:sequence>
+                                <xs:element name="item" minOccurs="0" maxOccurs="unbounded">
+                                  <xs:complexType>
+                                    <xs:sequence>
+                                      <xs:element name="name" type="xsd:string" minOccurs="0" maxOccurs="1"/>
+                                      <xs:element name="value" type="xsd:string" minOccurs="0" maxOccurs="1"/>
+                                      <xs:element name="valueType" type="xsd:string" minOccurs="0" maxOccurs="1"/>
+                                    </xs:sequence>
+                                  </xs:complexType>
+                                </xs:element>
+                              </xs:sequence>
+                            </xs:complexType>
+                          </xs:element>
+                          <xs:element name="place" minOccurs="0" maxOccurs="1">
+                            <xs:complexType>
+                              <xs:sequence>
+                                <xs:element name="item" minOccurs="0" maxOccurs="unbounded">
+                                  <xs:complexType>
+                                    <xs:sequence>
+                                      <xs:element name="id" type="xsd:string" minOccurs="0" maxOccurs="1"/>
+                                      <xs:element name="role" type="xsd:string" minOccurs="0" maxOccurs="1"/>
+                                      <xs:element name="attr_type" type="xsd:string" minOccurs="0" maxOccurs="1"/>
+                                      <xs:element name="street" type="xsd:string" minOccurs="0" maxOccurs="1"/>
+                                      <xs:element name="city" type="xsd:string" minOccurs="0" maxOccurs="1"/>
+                                      <xs:element name="postalCode" type="xsd:string" minOccurs="0" maxOccurs="1"/>
+                                      <xs:element name="country" type="xsd:string" minOccurs="0" maxOccurs="1"/>
+                                      <xs:element name="geographicLocation" minOccurs="0" maxOccurs="1">
+                                        <xs:complexType>
+                                          <xs:sequence>
+                                            <xs:element name="latitude" type="xsd:string" minOccurs="0" maxOccurs="1"/>
+                                            <xs:element name="longitude" type="xsd:string" minOccurs="0" maxOccurs="1"/>
+                                          </xs:sequence>
+                                        </xs:complexType>
+                                      </xs:element>
+                                    </xs:sequence>
+                                  </xs:complexType>
+                                </xs:element>
+                              </xs:sequence>
+                            </xs:complexType>
+                          </xs:element>
+                        </xs:sequence>
+                      </xs:complexType>
+                    </xs:element>
+                  </xs:sequence>
+                </xs:complexType>
+              </xs:element>
+            </xs:sequence>
+          </xs:complexType>
+        </xs:element>
+        <xs:element name="note" minOccurs="0" maxOccurs="1">
+          <xs:complexType>
+            <xs:sequence>
+              <xs:element name="item" minOccurs="0" maxOccurs="unbounded">
+                <xs:complexType>
+                  <xs:sequence>
+                    <xs:element name="text" type="xsd:string" minOccurs="0" maxOccurs="1"/>
+                    <xs:element name="date" type="xsd:string" minOccurs="0" maxOccurs="1"/>
+                    <xs:element name="author" type="xsd:string" minOccurs="0" maxOccurs="1"/>
+                  </xs:sequence>
+                </xs:complexType>
+              </xs:element>
+            </xs:sequence>
+          </xs:complexType>
+        </xs:element>
+      </xs:sequence>
+    </xs:complexType>
+  </xs:element>
+</xs:schema>

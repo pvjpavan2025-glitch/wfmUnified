@@ -1,10 +1,15 @@
 """
 Workflow Instance Service FastAPI application.
 """
+import logging
+from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, Depends, Query
 from fastapi.middleware.cors import CORSMiddleware
-from typing import List, Optional
+from typing import List, Optional, AsyncGenerator
+from sqlalchemy.ext.asyncio import AsyncSession
 import uvicorn
+
+from shared.sql_database import init_db, close_db, get_db_session
 
 from .models import (
     WorkflowInstanceCreate,
@@ -16,10 +21,24 @@ from .models import (
 )
 from .service import WorkflowInstanceService
 
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup: Initialize database
+    await init_db()
+    logging.info("Database initialized")
+    
+    yield
+    
+    # Shutdown: Close database connections
+    await close_db()
+    logging.info("Database connections closed")
+
+
 app = FastAPI(
     title="Workflow Instance Service",
     description="Service for managing workflow execution instances",
-    version="1.0.0"
+    version="1.0.0",
+    lifespan=lifespan
 )
 
 # Add CORS middleware
@@ -31,9 +50,16 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Dependency to get database session
+async def get_db() -> AsyncGenerator[AsyncSession, None]:
+    async for session in get_db_session():
+        yield session
+
 # Dependency to get service instance
-def get_workflow_service() -> WorkflowInstanceService:
-    return WorkflowInstanceService()
+async def get_workflow_service(
+    db: AsyncSession = Depends(get_db)
+) -> WorkflowInstanceService:
+    return WorkflowInstanceService(db_session=db)
 
 
 @app.post("/instances", response_model=WorkflowInstanceResponse)

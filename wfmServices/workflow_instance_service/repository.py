@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, update, delete, and_, or_
 from sqlalchemy.orm import selectinload
 
-from shared.database import get_db_session
+from shared.sql_database import get_db_session
 from .models import (
     WorkflowInstance, 
     WorkflowInstanceCreate, 
@@ -22,8 +22,8 @@ from .models import (
 class WorkflowInstanceRepository:
     """Repository for workflow instance database operations."""
     
-    def __init__(self):
-        self.db_session = get_db_session()
+    def __init__(self, db_session: AsyncSession):
+        self.db_session = db_session
     
     async def create_instance(self, instance_data: WorkflowInstanceCreate) -> WorkflowInstance:
         """Create a new workflow instance."""

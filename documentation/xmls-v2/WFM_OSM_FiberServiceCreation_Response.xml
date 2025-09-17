@@ -1,0 +1,30 @@
+
+<fiberServiceCreationResponse>
+	<id>unique_order_id</id>
+	<!--CRM Order ID -->
+	<category>FiberFeasibility</category>
+	<!-- For feasibility - FiberFeasibility & for createService - FiberInstallation -->
+	<state>acknowledged</state>
+	<orderDate>YYYY-MM-DDThh:mm:ssZ</orderDate>
+	<!-- start date -->
+	<requestedCompletionDate>YYYY-MM-DDThh:mm:ssZ</requestedCompletionDate>
+	<!-- not required -->
+	<description>brief_description_of_task</description>
+	<!-- Fiber feasibility -->
+	<id>customer_id</id>
+	<status>success</status>
+	<feasibilityId>feasibilityID</feasibilityId>
+	<hardware>
+		<splitter> Splitter details	</splitter>
+	</hardware>
+	<fiberCable>
+		<length>1km</length>
+	</fiberCable>
+	<civilWorkExecution>
+		<manhole>
+			<lat>10.0</lat>
+			<long>11.0</long>
+		</manhole>
+	</civilWorkExecution>
+</fiberServiceCreationResponse>
+

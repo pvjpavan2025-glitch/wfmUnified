@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ServiceOrderInstallationRequest>
+	<id>unique_order_id</id>	<!--CRM Order ID -->
+	<href>api_endpoint_url</href>	<!-- not required -->
+	<externalId>external_reference_id</externalId>	<!-- not required -->
+	<feasibiltyID>FeasibiltyID</feasibiltyID> 
+	<priority>priority_level</priority>	<!-- Default priority =5 -->
+	<category>FiberInstallation</category> 	<!-- For feasibility - FiberFeasibility & for createService - FiberInstallation -->
+	<state>acknowledged</state>	<!-- not required -->
+	<customerID>customerID</customerID>
+</ServiceOrderInstallationRequest>

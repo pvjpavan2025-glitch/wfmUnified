@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema">
+  <xs:element name="fiberServiceFeasibilityResponse">
+    <xs:complexType>
+      <xs:sequence>
+        <xs:element name="id" type="xs:string" minOccurs="0"/>
+        <xs:element name="<cyfunction Comment at 0x7ed83e5c9910>" type="xs:string" minOccurs="0"/>
+        <xs:element name="category" type="xs:string" minOccurs="0"/>
+        <xs:element name="<cyfunction Comment at 0x7ed83e5c9910>" type="xs:string" minOccurs="0"/>
+        <xs:element name="state" type="xs:string" minOccurs="0"/>
+        <xs:element name="orderDate" type="xs:string" minOccurs="0"/>
+        <xs:element name="<cyfunction Comment at 0x7ed83e5c9910>" type="xs:string" minOccurs="0"/>
+        <xs:element name="requestedCompletionDate" type="xs:string" minOccurs="0"/>
+        <xs:element name="<cyfunction Comment at 0x7ed83e5c9910>" type="xs:string" minOccurs="0"/>
+        <xs:element name="description" type="xs:string" minOccurs="0"/>
+        <xs:element name="<cyfunction Comment at 0x7ed83e5c9910>" type="xs:string" minOccurs="0"/>
+        <xs:element name="id" type="xs:string" minOccurs="0"/>
+        <xs:element name="surveyReport" type="xs:string" minOccurs="0"/>
+        <xs:element name="<cyfunction Comment at 0x7ed83e5c9910>" type="xs:string" minOccurs="0"/>
+        <xs:element name="feasibiltyID" type="xs:string" minOccurs="0"/>
+        <xs:element name="approvalsFromAuthorities" minOccurs="0" maxOccurs="unbounded">
+          <xs:complexType>
+            <xs:sequence>
+              <xs:element name="approvalId" type="xs:string" minOccurs="0"/>
+              <xs:element name="approvalId" type="xs:string" minOccurs="0"/>
+            </xs:sequence>
+          </xs:complexType>
+        </xs:element>
+        <xs:element name="civilWorkStudy" type="xs:string" minOccurs="0"/>
+        <xs:element name="hardwareRecommendation" type="xs:string" minOccurs="0"/>
+        <xs:element name="capex" type="xs:string" minOccurs="0"/>
+        <xs:element name="opex" type="xs:string" minOccurs="0"/>
+        <xs:element name="<cyfunction Comment at 0x7ed83e5c9910>" type="xs:string" minOccurs="0"/>
+      </xs:sequence>
+    </xs:complexType>
+  </xs:element>
+</xs:schema>

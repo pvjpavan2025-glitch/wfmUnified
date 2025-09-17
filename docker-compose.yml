@@ -181,8 +181,8 @@ services:
     restart: unless-stopped
     ports:
       - "8011:8011"
-    entrypoint: ["python"]
-    command: ["-m", "workflow_instance_service.main"]
+    entrypoint: ["sh", "-c"]
+    command: ["PYTHONPATH=/app python -m workflow_instance_service.main"]
     environment:
       - POSTGRESQL_URL=postgresql://workflow_user:workflow_pass@wfm-postgres:5432/workflow
       - MONGODB_URL=mongodb://wfmadmin:tsarolabs%4012345%23@wfm-mongodb:27017/wfm?authSource=admin

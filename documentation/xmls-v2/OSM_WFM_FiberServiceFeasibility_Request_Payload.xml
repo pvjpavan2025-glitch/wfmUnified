@@ -1,0 +1,116 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ServiceFeasibilityRequest>
+	<id>unique_order_id</id>
+	<!--CRM Order ID -->
+	<href>api_endpoint_url</href>
+	<!-- not required -->
+	<externalId>external_reference_id</externalId>
+	<!-- not required -->
+	<priority>priority_level</priority>
+	<!-- Default priority =5 -->
+	<category>FiberFeasibility</category>
+	<!-- For feasibility - FiberFeasibility & for createService - FiberInstallation -->
+	<state>acknowledged</state>
+	<!-- not required -->
+	<orderDate>YYYY-MM-DDThh:mm:ssZ</orderDate>
+	<!-- start date -->
+	<requestedCompletionDate>YYYY-MM-DDThh:mm:ssZ</requestedCompletionDate>
+	<!-- not required -->
+	<description>brief_description_of_task</description>
+	<!-- Fiber feasibility -->
+	<relatedParty>
+		<item>
+			<id>customer_id</id>
+			<!-- Account number -->
+			<role>Customer</role>
+			<!-- Customer -->
+			<name>customer_name</name>
+			<!-- Customer name-->
+			<attr_referredType>Individual</attr_referredType>
+			<!-- not required -->
+		</item>
+		<!--<item>
+			<id>technician_id</id>
+			<role>Assignee</role>
+			<name>technician_name</name>
+			<attr_referredType>Individual</attr_referredType>
+		</item>-->
+	</relatedParty>
+	<serviceOrderItem>
+		<item>
+			<id>item_id</id>
+			<!-- not required -->
+			<action>add</action>
+			<!-- not required -->
+			<service>
+				<id>service_id</id>
+				<!-- Line ID -->
+				<category>Broadband</category>
+				<serviceType>Fiber</serviceType>
+				<serviceSpecification>
+					<id>123</id>
+					<!-- not required -->
+					<name>FiberBroadband</name>
+					<version>1.0</version>
+				</serviceSpecification>
+				<serviceCharacteristic>
+					<!--	<item>
+						<name>Bandwidth</name>
+						<value>100mbps</value>
+						<valueType>string</valueType>
+					</item>-->
+					<item>
+						<name>ConnectionType</name>
+						<value>FTTH</value>
+						<valueType>string</valueType>
+					</item>
+					<item>
+						<name>SplicingRequired</name>
+						<value>true</value>
+						<valueType>boolean</valueType>
+					</item>
+				</serviceCharacteristic>
+				<place>
+					<item>
+						<id>location_id</id>
+						<!-- not required -->
+						<role>InstallationSite</role>
+						<attr_type>GeographicAddress</attr_type>
+						<!-- Customer add -->
+						<street>street_address</street>
+						<!-- Customer add -->
+						<city>city</city>
+						<postalCode>postal_code</postalCode>
+						<country>country</country>
+						<geographicLocation>
+							<SiteA>
+								<latitude>latitude</latitude>
+								<longitude>longitude</longitude>
+							</SiteA>
+							<SiteB>
+								<latitude>latitude</latitude>
+								<longitude>longitude</longitude>
+							</SiteB>
+						</geographicLocation>
+					</item>
+				</place>
+			</service>
+		</item>
+	</serviceOrderItem>
+	<note>
+		<item>
+			<text>additional_instructions</text>
+			<date>YYYY-MM-DDThh:mm:ssZ</date>
+			<!-- current date -->
+			<author>author_name</author>
+			<!-- Customer name -->
+		</item>
+	</note>
+	<!--<orderRelationship>
+		<item>
+			<id>parent_order_id</id>
+			<relationshipType>dependsOn</relationshipType>
+			<href>parent_order_url</href>
+		</item>
+	</orderRelationship>-->
+</ServiceFeasibilityRequest>

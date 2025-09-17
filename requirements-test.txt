@@ -1,0 +1,12 @@
+# Core
+fastapi
+uvicorn[standard]
+pydantic>=2.0.0
+sqlalchemy[asyncio]
+asyncpg
+lxml
+xmltodict
+python-dotenv
+pytest
+pytest-asyncio
+httpx

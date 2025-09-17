@@ -108,9 +108,30 @@ The system implements an **Order-Process-Task** hierarchical workflow architectu
 
 ### Data Flow
 
+### OSM XML Integration
+```
+OSM XML → XMLToJSONParser → OSMXMLMapper → OSMMapper → Rules Engine Format
+
+
+   ### Key Features
+   - Dual Format Support: Handles both XML and JSON inputs seamlessly
+   - Structure Validation: Validates OSM XML structure before processing
+   - Error Handling: Comprehensive error handling with meaningful messages
+   - Type Conversion: Intelligent conversion of XML strings to appropriate Python types
+   - Backward Compatibility: Existing JSON workflows remain unchanged
+   - Comprehensive Testing: Full test coverage for XML functionality
+```
+End to End flow
+
 ```
 External System → Order → Rules Engine → Process Selection → BPMN Execution → Task Creation → Assignment → Completion
 ```
+
+The Order refers to below OSM XML integration i.e.,
+```
+Order (OSM XML → XMLToJSONParser → OSMXMLMapper → OSMMapper → Rules Engine Format) → Rules Engine → Process Selection → BPMN Execution → Task Creation → Assignment → Completion
+```
+
 
 ### Integration Points
 
@@ -308,3 +329,18 @@ docker-compose logs -f
 ## License
 
 [Your License Here]
+
+
+## for running E2E
+### Create virtual environment
+python3 -m venv venv
+
+### Activate it
+source venv/bin/activate
+
+### Install requirements
+pip install -r requirements-test.txt
+
+### Running the Test
+cd /Users/pavan.pvj/code/wfmUnified
+python -m e2e.test_osm_flow

@@ -127,9 +127,15 @@ End to End flow
 External System → Order → Rules Engine → Process Selection → BPMN Execution → Task Creation → Assignment → Completion
 ```
 
+XML to JSON Flow Summary
+```
+OSM XML Input → Integration Service → JSON Processing → Rules Engine → Process Selection → JSON Response → XML Conversion → XML Output File
+```
+
+
 The Order refers to below OSM XML integration i.e.,
 ```
-Order (OSM XML → XMLToJSONParser → OSMXMLMapper → OSMMapper → Rules Engine Format) → Rules Engine → Process Selection → BPMN Execution → Task Creation → Assignment → Completion
+Order (OSM XML → XMLToJSONParser → OSMXMLMapper → OSMMapper → Rules Engine Format) → Rules Engine → Process Selection → BPMN Execution → Task Creation → Assignment → Completion (JSON Response → XML Conversion → XML Output File)
 ```
 
 

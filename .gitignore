@@ -422,3 +422,5 @@ coverage.xml
 /venv
 *~
 .DS_Store
+
+output/responses/*.xml

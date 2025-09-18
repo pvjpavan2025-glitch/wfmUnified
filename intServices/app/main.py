@@ -7,7 +7,7 @@ from .repositories.db import init_db, engine
 from sqlalchemy import text
 from . import mappers  # noqa: F401  # ensure mapper registration
 from .routers import applications, ingest
-from .api import osm_xml_endpoint
+from .api import osm_xml_endpoint, json_to_xml_endpoint
 
 app = FastAPI(title=settings.app_name)
 
@@ -42,6 +42,7 @@ async def on_startup():
 app.include_router(applications)
 app.include_router(ingest)
 app.include_router(osm_xml_endpoint.router)
+app.include_router(json_to_xml_endpoint.router)
 
 @app.get("/healthz")
 async def health():

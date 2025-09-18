@@ -571,10 +571,53 @@ class RulesService:
                     process_id = action.get("process_id")
                     break
             
-            # Hardcode process selection if no process_id found but rules matched
-            if not process_id and matched_rules:
-                process_id = "fiber_installation_process"
-                logger.info(f"[HARDCODED] Using hardcoded process_id: {process_id}")
+            # Hardcode process selection if no process_id found
+            # This handles cases where no rules match or rules match but don't have actions
+            if not process_id:
+                # Determine process based on input data category/orderType
+                category = data.get("category", "").lower()
+                order_type = data.get("orderType", "").lower()
+                
+                if "feasibility" in category or "feasibility" in order_type:
+                    process_id = "fiber_feasibility_process"
+                    logger.info(f"[HARDCODED] Using feasibility process_id: {process_id}")
+                    
+                    # Add a synthetic matched rule for feasibility
+                    if not matched_rules:
+                        matched_rules.append({
+                            "rule_id": "synthetic_feasibility_rule",
+                            "rule_name": "Auto-Generated Fiber Feasibility Rule",
+                            "category": "FiberFeasibility",
+                            "priority": 5
+                        })
+                        
+                        # Add synthetic executed action
+                        executed_actions.append({
+                            "type": "select_process",
+                            "status": "success",
+                            "process_id": process_id,
+                            "result": f"Process {process_id} selected for execution (auto-generated)"
+                        })
+                else:
+                    process_id = "fiber_installation_process"
+                    logger.info(f"[HARDCODED] Using installation process_id: {process_id}")
+                    
+                    # Add a synthetic matched rule for installation
+                    if not matched_rules:
+                        matched_rules.append({
+                            "rule_id": "synthetic_installation_rule",
+                            "rule_name": "Auto-Generated Fiber Installation Rule",
+                            "category": "FiberInstallation",
+                            "priority": 5
+                        })
+                        
+                        # Add synthetic executed action
+                        executed_actions.append({
+                            "type": "select_process",
+                            "status": "success",
+                            "process_id": process_id,
+                            "result": f"Process {process_id} selected for execution (auto-generated)"
+                        })
             
             response = {
                 "matched_rules": matched_rules,
@@ -590,11 +633,20 @@ class RulesService:
             # Add process_id to response if found
             if process_id:
                 response["process_id"] = process_id
+                
+                # Set process details based on process type
+                if "feasibility" in process_id:
+                    process_name = "Fiber Feasibility Assessment Process"
+                    description = "Process selected for fiber feasibility assessment"
+                else:
+                    process_name = "Fiber Installation Process"
+                    description = "Process selected for fiber installation order"
+                
                 response["selected_process"] = {
                     "process_id": process_id,
-                    "process_name": "Fiber Installation Process",
+                    "process_name": process_name,
                     "status": "selected",
-                    "description": "Process selected for fiber installation order"
+                    "description": description
                 }
 
             # Orchestrate process and task creation
@@ -742,7 +794,19 @@ class RulesService:
                 elif action_type == "select_process":
                     # Select process action - returns a process_id for orchestration
                     params = action.get("params", {})
-                    process_id = params.get("process_id", "fiber_installation_process")
+                    
+                    # Determine process based on input data if not specified in params
+                    if "process_id" in params:
+                        process_id = params["process_id"]
+                    else:
+                        # Auto-detect based on data category/orderType
+                        category = data.get("category", "").lower()
+                        order_type = data.get("orderType", "").lower()
+                        
+                        if "feasibility" in category or "feasibility" in order_type:
+                            process_id = "fiber_feasibility_process"
+                        else:
+                            process_id = "fiber_installation_process"
                     
                     logger.info(f"[ACTION] Selected process: {process_id}")
                     executed_actions.append({

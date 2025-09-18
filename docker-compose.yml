@@ -419,6 +419,7 @@ services:
     volumes:
       - ./intServices:/app
       - /app/__pycache__
+      - ./output:/app/output
     ports:
       - "8082:8082"
     depends_on:

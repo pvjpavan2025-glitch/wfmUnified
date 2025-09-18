@@ -31,12 +31,32 @@ class MessageBrokerConfig:
         self.jms_response_queue = os.getenv("JMS_RESPONSE_QUEUE", "jms/OSMResponseQueue")
         
         # File Configuration
-        self.input_dir = os.getenv("INPUT_DIR", "/app/input")
-        self.output_dir = os.getenv("OUTPUT_DIR", "/app/output")
+        # Check if running in Docker (check common Docker environment variables)
+        is_docker = os.path.exists('/.dockerenv') or os.environ.get('DOCKER_CONTAINER') == 'true'
         
+        # Data logging configuration
+        self.enable_data_log = os.getenv('DATA_LOG', 'false').lower() == 'true'
+        
+        if is_docker or not os.getenv('LOCAL_DATA_DIR'):
+            # Use Docker paths if in container or LOCAL_DATA_DIR not set
+            self.input_dir = os.getenv("INPUT_DIR", "/app/input")
+            self.output_dir = os.getenv("OUTPUT_DIR", "/app/output")
+        else:
+            # Use local development paths
+            base_dir = os.getenv("LOCAL_DATA_DIR", os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "data"))
+            self.input_dir = os.path.join(base_dir, "messages", "input")
+            self.output_dir = os.path.join(base_dir, "messages", "output")
+
         # Create directories if they don't exist
-        os.makedirs(self.input_dir, exist_ok=True)
-        os.makedirs(self.output_dir, exist_ok=True)
+        try:
+            os.makedirs(self.input_dir, exist_ok=True)
+            os.makedirs(self.output_dir, exist_ok=True)
+            logger.info(f"Using input directory: {self.input_dir}")
+            logger.info(f"Using output directory: {self.output_dir}")
+        except Exception as e:
+            logger.error(f"Failed to create directories: {str(e)}")
+            logger.error(f"Current working directory: {os.getcwd()}")
+            raise
 
 class MessageBroker:
     """Message broker implementation supporting multiple backends."""
@@ -131,12 +151,43 @@ class MessageBroker:
         await asyncio.sleep(1)
         return None
 
+    async def _save_to_file(self, content: str, filename: str) -> None:
+        """
+        Save content to a file in the output directory if DATA_LOG is enabled.
+        
+        Args:
+            content: The content to save
+            filename: The name of the file to save to
+        """
+        if not self.config.enable_data_log:
+            return
+            
+        try:
+            os.makedirs(self.config.output_dir, exist_ok=True)
+            from datetime import datetime
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+            filepath = os.path.join(self.config.output_dir, f"{timestamp}_{filename}")
+            with open(filepath, 'w') as f:
+                f.write(content)
+            logger.info(f"Saved message to {filepath}")
+        except Exception as e:
+            logger.error(f"Failed to save message to file: {str(e)}")
+
     async def _write_to_jms(self, message: str):
         """Write to JMS queue (stub implementation)."""
-        logger.info(f"JMS write to {self.config.jms_response_queue} (stub implementation)")
-        logger.debug(f"Message content: {message[:200]}...")
+        logger.info(f"JMS write to {self.config.jms_response_queue}")
+        
+        # Save the outgoing message if DATA_LOG is enabled
+        if self.config.enable_data_log:
+            await self._save_to_file(message, "jms_outgoing_message.xml")
+            
         # TODO: Implement actual JMS writing when queue details are available
+        logger.debug(f"Message content: {message[:200]}...")
         await asyncio.sleep(0.5)
+        
+        # For testing: simulate a response
+        if self.config.enable_data_log:
+            await self._save_to_file("<response>Test JMS response</response>", "jms_incoming_response.xml")
 
     async def close(self):
         """Clean up resources."""

@@ -3,19 +3,27 @@ End-to-End Test using REST APIs for OSM Order Flow:
 OSM XML → XMLToJSONParser → OSMXMLMapper → OSMMapper → Rules Engine → Process Selection → BPMN Execution → Task Creation
 """
 
+"""
+End-to-End Test using REST APIs for OSM Order Flow:
+OSM XML → XMLToJSONParser → OSMXMLMapper → OSMMapper → Rules Engine → Process Selection → BPMN Execution → Task Creation
+"""
+
 import os
 import sys
 import asyncio
 import logging
 import httpx
-import json
+import xml.etree.ElementTree as ET
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, Any, Optional
 
 # Add project root to Python path
 PROJECT_ROOT = str(Path(__file__).parent.parent)
-sys.path.insert(0, PROJECT_ROOT)
+sys.path.insert(0, os.path.join(PROJECT_ROOT, "wfmServices"))
+
+# Import message broker
+from common.message_broker import MessageBroker, MessageBrokerConfig
 
 # Configure logging
 logging.basicConfig(
@@ -29,11 +37,6 @@ INTEGRATION_SERVICE_URL = "http://localhost:8082"  # intServices
 RULES_SERVICE_URL = "http://localhost:8003"  # wfmServices rules-service
 PROCESS_SERVICE_URL = "http://localhost:8008"  # wfmServices process-service
 
-# Test data paths
-TEST_DATA_DIR = os.path.join(PROJECT_ROOT, "documentation", "xmls-v2")
-TEST_XML_FILE = os.path.join(TEST_DATA_DIR, "OSM_WFM_CreateFiberService_Request_Payload.xml")
-# TEST_XML_FILE = os.path.join(TEST_DATA_DIR, "OSM_WFM_FiberServiceFeasibility_Request_Payload.xml")
-
 class TestOSMFlow:
     """End-to-end test for OSM order flow using REST APIs."""
     
@@ -41,24 +44,56 @@ class TestOSMFlow:
         self.client = httpx.AsyncClient()
         self.order_id = None
         self.process_instance_id = None
+        self.message_broker = MessageBroker(MessageBrokerConfig())
+    
+    async def initialize(self):
+        """Initialize test resources."""
+        await self.message_broker.initialize()
     
     async def cleanup(self):
         """Clean up test resources."""
         await self.client.aclose()
+        await self.message_broker.close()
     
     async def load_test_xml(self) -> str:
-        """Load test XML file."""
-        with open(TEST_XML_FILE, 'r') as f:
-            return f.read()
+        """Load test XML from configured source."""
+        # Try to read from the message broker first
+        content = await self.message_broker.read_message()
+        
+        # If no content from broker, fall back to test file
+        if not content:
+            test_file = os.path.join(
+                PROJECT_ROOT, 
+                "documentation", 
+                "xmls-v2", 
+                "OSM_WFM_CreateFiberService_Request_Payload.xml"
+            )
+            if os.path.exists(test_file):
+                with open(test_file, 'r') as f:
+                    content = f.read()
+                    logger.info(f"Read {len(content)} bytes from test file")
+        
+        return content
     
+    async def save_response(self, response: str, filename: Optional[str] = None):
+        """Save response to the configured destination."""
+        await self.message_broker.write_message(response, filename)
+        logger.info(f"Response saved successfully")
+
     async def test_osm_flow(self):
         """Test the complete OSM order flow."""
         try:
+            # Initialize message broker
+            await self.initialize()
+            
             # 1. Load test XML
             logger.info("1. Loading test XML...")
             xml_content = await self.load_test_xml()
-            
-            # 2. Send to Integration Service for XML processing
+            if not xml_content:
+                logger.error("No XML content found")
+                return False
+                
+            logger.info(f"Successfully loaded XML content ({len(xml_content)} bytes)")
             logger.info("2. Sending to Integration Service for XML processing...")
             response = await self.client.post(
                 f"{INTEGRATION_SERVICE_URL}/osm/xml/process",

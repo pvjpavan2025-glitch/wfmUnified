@@ -337,16 +337,146 @@ docker-compose logs -f
 [Your License Here]
 
 
-## for running E2E
-### Create virtual environment
-python3 -m venv venv
+## JMS Integration
 
-### Activate it
-source venv/bin/activate
+The system supports JMS (Java Message Service) for enterprise message queuing, allowing integration with systems like WebLogic. The implementation supports both file-based and JMS-based message handling, configurable via environment variables.
 
-### Install requirements
-pip install -r requirements-test.txt
+### Configuration
 
-### Running the Test
-cd /Users/pavan.pvj/code/wfmUnified
-python -m e2e.test_osm_flow
+Update your `.env` file with the following JMS configuration:
+
+```ini
+# Message Broker Configuration
+MESSAGE_BROKER_TYPE=file  # Options: file, jms
+
+# File-based Configuration (used when MESSAGE_BROKER_TYPE=file)
+INPUT_DIR=/app/input     # Directory to read XML files from
+OUTPUT_DIR=/app/output   # Directory to write response files to
+
+# JMS Configuration (used when MESSAGE_BROKER_TYPE=jms)
+JMS_URL=t3://weblogic:7001
+JMS_USERNAME=weblogic
+JMS_PASSWORD=welcome1
+JMS_CONNECTION_FACTORY=jms/ConnectionFactory
+JMS_REQUEST_QUEUE=jms/OSMRequestQueue
+JMS_RESPONSE_QUEUE=jms/OSMResponseQueue
+```
+
+### File-based Mode (Default)
+
+1. **Setup Directories**:
+   ```bash
+   mkdir -p data/messages/input data/messages/output
+   ```
+
+2. **Place Test Files**:
+   ```bash
+   cp documentation/xmls-v2/*.xml data/messages/input/
+   ```
+
+3. **Run the Application**:
+   ```bash
+   docker-compose up -d
+   ```
+
+### JMS Mode
+
+1. **Update Configuration**:
+   ```bash
+   echo "MESSAGE_BROKER_TYPE=jms" >> .env
+   echo "JMS_URL=t3://your-weblogic-host:7001" >> .env
+   echo "JMS_USERNAME=your_username" >> .env
+   echo "JMS_PASSWORD=your_password" >> .env
+   ```
+
+2. **Restart Services**:
+   ```bash
+   docker-compose down
+   docker-compose up -d
+   ```
+
+### Testing the Integration
+
+1. **Run E2E Tests**:
+   ```bash
+   # Create virtual environment
+   python3 -m venv venv
+   
+   # Activate it
+   source venv/bin/activate
+   
+   # Install requirements
+   pip install -r requirements-test.txt
+   
+   # Run the test
+   cd /Users/pavan.pvj/code/wfmUnified
+   python -m e2e.test_osm_flow
+   ```
+
+### JMS Worker Service
+
+The system includes a background worker that continuously monitors the JMS queue for new messages:
+
+```bash
+# Start the JMS worker
+# (runs automatically with docker-compose up -d)
+docker-compose up -d jms-worker
+
+# View logs
+docker-compose logs -f jms-worker
+
+# Stop the worker
+docker-compose stop jms-worker
+```
+
+### Monitoring
+
+- Check logs for message processing:
+  ```bash
+  # Integration service logs
+  docker-compose logs -f integration-service
+  
+  # Rules service logs
+  docker-compose logs -f rules-service
+  
+  # JMS worker logs
+  docker-compose logs -f jms-worker
+  ```
+
+- In file mode, check the output directory for processed messages:
+  ```bash
+  # View processed messages
+  ls -l data/messages/output/
+  
+  # View input directory (for testing)
+  ls -l data/messages/input/
+  ```
+
+### Testing the JMS Worker
+
+1. **File-based Testing**:
+   ```bash
+   # Create a test message
+   mkdir -p data/messages/input
+   cp documentation/xmls-v2/OSM_WFM_CreateFiberService_Request_Payload.xml data/messages/input/
+   
+   # Watch the logs
+   docker-compose logs -f jms-worker
+   ```
+
+2. **Verifying Processing**:
+   - The worker will pick up the file and process it
+   - Check the output directory for the response
+   - Verify logs for any errors or processing information
+
+### Troubleshooting
+
+- **No messages processed**:
+  - Check if the JMS worker is running: `docker-compose ps jms-worker`
+  - Verify queue names and connection details in the `.env` file
+  - Check for authentication or connection errors in the logs
+
+- **Message processing errors**:
+  - Check the JMS worker logs for detailed error messages
+  - Verify that the integration and rules services are running and accessible
+  - Ensure the XML format matches what the services expect
